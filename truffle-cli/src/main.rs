@@ -59,16 +59,20 @@ fn main() {
                                     println!("{:#?}", sim.get_tables());
                                 }
                                 ".import" => {
-                                    let path = pieces.next().unwrap();
-                                    let sql = read_to_string(path).unwrap();
-                                    match sim.execute(&sql) {
-                                        Ok(_) => {
-                                            println!("✅ ok");
-                                        }
-                                        Err(e) => {
-                                            println!("❌ {e}");
-                                        }
-                                    };
+                                    if let Some(path) = pieces.next()
+                                        && let Ok(sql) = read_to_string(path)
+                                    {
+                                        match sim.execute(&sql) {
+                                            Ok(_) => {
+                                                println!("✅ ok");
+                                            }
+                                            Err(e) => {
+                                                println!("❌ {e}");
+                                            }
+                                        };
+                                    } else {
+                                        println!("invalid path for importing");
+                                    }
                                 }
                                 ".exit" => {
                                     break;
