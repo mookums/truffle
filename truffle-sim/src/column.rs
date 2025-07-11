@@ -1,6 +1,7 @@
+use serde::Serialize;
 use sqlparser::ast::DataType;
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Serialize)]
 pub enum ColumnKind {
     /// 16 bit Signed Integer
     SmallInt,
@@ -46,7 +47,17 @@ impl From<DataType> for ColumnKind {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
 pub struct Column {
-    pub kind: ColumnKind,
+    kind: ColumnKind,
+}
+
+impl Column {
+    pub fn new(kind: ColumnKind) -> Self {
+        Self { kind }
+    }
+
+    pub fn get_kind(&self) -> &ColumnKind {
+        &self.kind
+    }
 }

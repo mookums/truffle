@@ -50,10 +50,14 @@ fn main() {
                         if line.starts_with('.') {
                             match line.as_str() {
                                 ".help" => {
-                                    println!(".tables -> prints out of all of the tables");
+                                    println!("    .tables -> prints out of all of the tables");
+                                    println!("    .exit -> exit (can also ctrl+c)");
                                 }
                                 ".tables" => {
                                     println!("{:#?}", sim.get_tables());
+                                }
+                                ".exit" => {
+                                    break;
                                 }
                                 _ => {
                                     println!("unknown command: {line}");
