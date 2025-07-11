@@ -1,0 +1,12 @@
+[package]
+name = "truffle-sim"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+serde.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+thiserror.workspace = true
+
+sqlparser = "0.57.0"
