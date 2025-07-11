@@ -354,6 +354,76 @@ mod tests {
         );
     }
 
+    #[test]
+    fn select_qualified_wildcard() {
+        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        sim.execute("create table person (id int, name text)")
+            .unwrap();
+
+        sim.execute("select person.* from person").unwrap();
+    }
+
+    #[test]
+    fn select_qualified_wildcard_with_alias() {
+        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        sim.execute("create table person (id int, name text)")
+            .unwrap();
+        sim.execute("create table orders (id int, total int)")
+            .unwrap();
+
+        sim.execute("select p.* from person p, orders").unwrap();
+    }
+
+    #[test]
+    fn select_qualified_wildcard_with_unknown_table() {
+        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        sim.execute("create table person (id int, name text)")
+            .unwrap();
+
+        assert_eq!(
+            sim.execute("select unknown.* from person"),
+            Err(Error::TableOrAliasDoesntExist("unknown".to_string()))
+        );
+    }
+
+    #[test]
+    fn select_qualified_wildcard_table_not_in_from() {
+        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        sim.execute("create table person (id int, name text)")
+            .unwrap();
+        sim.execute("create table orders (id int, total int)")
+            .unwrap();
+
+        assert_eq!(
+            sim.execute("select orders.* from person"),
+            Err(Error::TableOrAliasDoesntExist("orders".to_string()))
+        );
+    }
+
+    #[test]
+    fn select_multiple_qualified_wildcards() {
+        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        sim.execute("create table person (id int, name text)")
+            .unwrap();
+        sim.execute("create table orders (order_id int, total int)")
+            .unwrap();
+
+        sim.execute("select p.*, o.* from person p, orders o")
+            .unwrap();
+    }
+
+    #[test]
+    fn select_qualified_wildcard_with_columns() {
+        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        sim.execute("create table person (id int, name text)")
+            .unwrap();
+        sim.execute("create table orders (order_id int, total int)")
+            .unwrap();
+
+        sim.execute("select p.*, orders.total from person p, orders")
+            .unwrap();
+    }
+
     // #[test]
     // fn select_where_column_doesnt_exist() {
     //     let mut sim = Simulator::new(Box::new(GenericDialect {}));
