@@ -48,13 +48,29 @@ fn main() {
                 match readline {
                     Ok(line) => {
                         if line.starts_with('.') {
-                            match line.as_str() {
+                            let mut pieces = line.split_terminator(' ');
+                            match pieces.next().unwrap() {
                                 ".help" => {
                                     println!("    .tables -> prints out of all of the tables");
+                                    println!(
+                                        "    .import <PATH> -> imports the file at path and executes it"
+                                    );
                                     println!("    .exit -> exit (can also ctrl+c)");
                                 }
                                 ".tables" => {
                                     println!("{:#?}", sim.get_tables());
+                                }
+                                ".import" => {
+                                    let path = pieces.next().unwrap();
+                                    let sql = read_to_string(path).unwrap();
+                                    match sim.execute(&sql) {
+                                        Ok(_) => {
+                                            println!("✅ ok");
+                                        }
+                                        Err(e) => {
+                                            println!("❌ {e}");
+                                        }
+                                    };
                                 }
                                 ".exit" => {
                                     break;
