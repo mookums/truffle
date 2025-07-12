@@ -546,6 +546,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "truffle-macro"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+ "truffle-sim",
+]
+
+[[package]]
 name = "truffle-sim"
 version = "0.1.0"
 dependencies = [
@@ -554,6 +564,13 @@ dependencies = [
  "thiserror",
  "tracing",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "truffle-use-macro"
+version = "0.1.0"
+dependencies = [
+ "truffle-macro",
 ]
 
 [[package]]
