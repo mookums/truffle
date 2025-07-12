@@ -1,7 +1,10 @@
 [workspace]
 resolver = "2"
 members = [
-    "truffle-cli", "truffle-macro", "truffle-sim", "truffle-use-macro",
+    "truffle-cli",
+    "truffle-macro",
+    "truffle-sim",
+    "truffle-sqlx",
 ]
 
 [workspace.dependencies]

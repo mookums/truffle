@@ -14,7 +14,7 @@ use table::Table;
 
 #[derive(Debug, PartialEq, Eq, thiserror::Error)]
 pub enum Error {
-    #[error("Parsing: {0}")]
+    #[error("{0}")]
     Parsing(#[from] sqlparser::parser::ParserError),
     #[error("SQL: {0}")]
     Sql(String),
