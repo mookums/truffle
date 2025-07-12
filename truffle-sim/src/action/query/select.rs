@@ -706,7 +706,7 @@ mod tests {
         let mut sim = Simulator::new(Box::new(GenericDialect {}));
         sim.execute("create table person (id int, name text, age int)")
             .unwrap();
-        sim.execute("select name from person where ((age > 18 AND age < 65) OR name = 'Admin')")
+        sim.execute("select name from person where ((age > 18 AND age < 65) OR name = 'Admin' or (name is null or age is not null))")
             .unwrap();
     }
 
