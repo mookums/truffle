@@ -78,13 +78,21 @@ fn validate_where_expr(
 ) -> Result<(), Error> {
     // TODO: validate types on expressions.
     match expr {
-        Expr::Value(_)
-        | Expr::IsTrue(_)
-        | Expr::IsNotTrue(_)
-        | Expr::IsFalse(_)
-        | Expr::IsNotFalse(_)
-        | Expr::IsNull(_)
-        | Expr::IsNotNull(_) => {}
+        Expr::Value(_) => {}
+        Expr::IsTrue(expr)
+        | Expr::IsNotTrue(expr)
+        | Expr::IsFalse(expr)
+        | Expr::IsNotFalse(expr)
+        | Expr::IsNull(expr)
+        | Expr::IsNotNull(expr)
+        | Expr::IsUnknown(expr)
+        | Expr::IsNotUnknown(expr) => {
+            validate_where_expr(expr, sim, tables)?;
+        }
+        Expr::IsDistinctFrom(left, right) | Expr::IsNotDistinctFrom(left, right) => {
+            validate_where_expr(left, sim, tables)?;
+            validate_where_expr(right, sim, tables)?;
+        }
         Expr::Identifier(ident) => {
             let name = &ident.value;
 
@@ -119,6 +127,14 @@ fn validate_where_expr(
                     }
                 }
             }
+        }
+        Expr::AnyOp { left, right, .. } => {
+            validate_where_expr(left, sim, tables)?;
+            validate_where_expr(right, sim, tables)?;
+        }
+        Expr::AllOp { left, right, .. } => {
+            validate_where_expr(left, sim, tables)?;
+            validate_where_expr(right, sim, tables)?;
         }
         Expr::BinaryOp { left, right, .. } => {
             validate_where_expr(left, sim, tables)?;
