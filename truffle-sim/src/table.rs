@@ -88,6 +88,14 @@ impl Table {
         self.constraints.get(&key)
     }
 
+    pub fn is_primary_key(&self, columns: &[impl ToString]) -> bool {
+        let columns: Vec<String> = columns.iter().map(|c| c.to_string()).collect();
+        let key = Table::create_compound_key(&columns);
+        self.constraints
+            .get(&key)
+            .is_some_and(|c| c.iter().any(|o| matches!(o, Constraint::PrimaryKey)))
+    }
+
     pub fn is_unique(&self, columns: &[impl ToString]) -> bool {
         let columns: Vec<String> = columns.iter().map(|c| c.to_string()).collect();
         let key = Table::create_compound_key(&columns);

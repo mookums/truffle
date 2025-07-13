@@ -636,4 +636,40 @@ mod tests {
             Err(Error::DefaultOnNotDefaultColumn("person_id".to_string()))
         );
     }
+
+    #[test]
+    fn create_table_with_primary_key_col() {
+        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        sim.execute("create table person (id uuid primary key);")
+            .unwrap();
+
+        assert!(sim.get_table("person").unwrap().is_primary_key(&["id"]))
+    }
+
+    #[test]
+    fn create_table_with_unique_col() {
+        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        sim.execute("create table person (id uuid primary key, name text unique);")
+            .unwrap();
+
+        assert!(sim.get_table("person").unwrap().is_unique(&["name"]))
+    }
+
+    #[test]
+    fn create_table_with_primary_key_on_table() {
+        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        sim.execute("create table person (id uuid, primary key (id));")
+            .unwrap();
+
+        assert!(sim.get_table("person").unwrap().is_primary_key(&["id"]))
+    }
+
+    #[test]
+    fn create_table_with_unique_on_table() {
+        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        sim.execute("create table person (id uuid primary key, name text, unique(name));")
+            .unwrap();
+
+        assert!(sim.get_table("person").unwrap().is_unique(&["name"]))
+    }
 }
