@@ -1,4 +1,4 @@
-use std::fs::read_to_string;
+use std::{fs::read_to_string, path::Path};
 
 use clap::Parser;
 use rustyline::{DefaultEditor, error::ReadlineError};
@@ -37,6 +37,17 @@ fn main() {
             }
         }
         Commands::Repl => {
+            fn execute_sql(sim: &mut Simulator, sql: &str) {
+                match sim.execute(sql) {
+                    Ok(_) => {
+                        println!("✅ ok");
+                    }
+                    Err(e) => {
+                        println!("❌ {e}");
+                    }
+                };
+            }
+
             let mut sim = Simulator::new(Box::new(GenericDialect {}));
             let mut rl = DefaultEditor::new().unwrap();
 
@@ -52,12 +63,28 @@ fn main() {
                             match pieces.next().unwrap() {
                                 ".help" => {
                                     println!("    .tables -> prints the tables");
+                                    println!("    .table <TABLE> -> prints table info");
                                     println!("    .constraints <TABLE> -> prints constraints");
                                     println!("    .import <PATH> -> executes file at the path");
                                     println!("    .exit -> exit (can also ctrl+c)");
                                 }
                                 ".tables" => {
-                                    println!("{:#?}", sim.get_tables());
+                                    println!(
+                                        "{:#?}",
+                                        sim.get_tables()
+                                            .iter()
+                                            .map(|t| t.0)
+                                            .collect::<Vec<&String>>()
+                                    );
+                                }
+                                ".table" => {
+                                    if let Some(table) = pieces.next()
+                                        && let Some(table) = sim.get_table(table)
+                                    {
+                                        println!("{table:#?}");
+                                    } else {
+                                        println!("invalid table");
+                                    }
                                 }
                                 ".constraints" => {
                                     if let Some(table) = pieces.next()
@@ -69,17 +96,31 @@ fn main() {
                                     }
                                 }
                                 ".import" => {
-                                    if let Some(path) = pieces.next()
-                                        && let Ok(sql) = read_to_string(path)
-                                    {
-                                        match sim.execute(&sql) {
-                                            Ok(_) => {
-                                                println!("✅ ok");
+                                    if let Some(path) = pieces.next() {
+                                        let path = Path::new(path);
+
+                                        if path.is_file() {
+                                            let sql = read_to_string(path).unwrap();
+                                            execute_sql(&mut sim, &sql);
+                                        } else if path.is_dir() {
+                                            let dir = path.read_dir().unwrap();
+                                            let mut paths = vec![];
+                                            for entry in dir {
+                                                let entry = entry.unwrap();
+                                                let path = entry.path();
+
+                                                if path.is_file() {
+                                                    paths.push(path);
+                                                }
                                             }
-                                            Err(e) => {
-                                                println!("❌ {e}");
+
+                                            paths.sort();
+
+                                            for path in paths {
+                                                let sql = read_to_string(path).unwrap();
+                                                execute_sql(&mut sim, &sql);
                                             }
-                                        };
+                                        }
                                     } else {
                                         println!("invalid path for importing");
                                     }
@@ -95,14 +136,7 @@ fn main() {
                             continue;
                         }
 
-                        match sim.execute(&line) {
-                            Ok(_) => {
-                                println!("✅ ok");
-                            }
-                            Err(e) => {
-                                println!("❌ {e}");
-                            }
-                        };
+                        execute_sql(&mut sim, &line);
                     }
                     Err(ReadlineError::Interrupted) => {
                         println!("CTRL-C");
