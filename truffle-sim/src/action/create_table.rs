@@ -3,9 +3,10 @@ use tracing::debug;
 
 use crate::{
     Error, Simulator,
-    column::{Column, ColumnType},
+    column::Column,
     object_name_to_strings,
     table::{Constraint, Table},
+    ty::SqlType,
 };
 
 pub fn handle_create_table(sim: &mut Simulator, create_table: CreateTable) -> Result<(), Error> {
@@ -21,7 +22,7 @@ pub fn handle_create_table(sim: &mut Simulator, create_table: CreateTable) -> Re
         let column_name = &column.name.value;
         let mut nullable = false;
         let mut default = false;
-        let ty: ColumnType = column.data_type.into();
+        let ty: SqlType = column.data_type.into();
 
         // Handle options/constraints on a column level.
         for option in column.options {
@@ -285,7 +286,7 @@ fn validate_on_action(
 
 #[cfg(test)]
 mod tests {
-    use crate::{column::ColumnType, *};
+    use crate::{ty::SqlType, *};
 
     #[test]
     fn create_table() {
@@ -325,17 +326,11 @@ mod tests {
             .unwrap();
         assert_eq!(sim.tables.len(), 1);
         let table = sim.tables.get("person").unwrap();
+        assert_eq!(table.columns.get("id").unwrap().get_ty(), &SqlType::Uuid);
+        assert_eq!(table.columns.get("name").unwrap().get_ty(), &SqlType::Text);
         assert_eq!(
-            table.columns.get("id").unwrap().get_kind(),
-            &ColumnType::Uuid
-        );
-        assert_eq!(
-            table.columns.get("name").unwrap().get_kind(),
-            &ColumnType::Text
-        );
-        assert_eq!(
-            table.columns.get("weight").unwrap().get_kind(),
-            &ColumnType::Float
+            table.columns.get("weight").unwrap().get_ty(),
+            &SqlType::Float
         );
     }
 
@@ -425,8 +420,8 @@ mod tests {
             "#,
             ),
             Err(Error::TypeMismatch {
-                expected: ColumnType::Uuid,
-                got: ColumnType::Text
+                expected: SqlType::Uuid,
+                got: SqlType::Text
             })
         );
     }
@@ -513,8 +508,8 @@ mod tests {
             "#,
             ),
             Err(Error::TypeMismatch {
-                expected: ColumnType::Uuid,
-                got: ColumnType::Text
+                expected: SqlType::Uuid,
+                got: SqlType::Text
             })
         );
     }

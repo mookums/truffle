@@ -1,9 +1,12 @@
 use std::collections::HashSet;
 
-use sqlparser::ast::{Expr, Select, SelectItem, SelectItemQualifiedWildcardKind, TableFactor};
+use sqlparser::ast::{
+    BinaryOperator, CastKind, Expr, Select, SelectItem, SelectItemQualifiedWildcardKind,
+    TableFactor, UnaryOperator, Value,
+};
 use tracing::warn;
 
-use crate::{Error, Simulator, object_name_to_strings};
+use crate::{Error, Simulator, column::Column, object_name_to_strings, ty::SqlType};
 
 pub enum SelectColumns {
     /// Selects all columns across the FROM clause.
@@ -71,34 +74,107 @@ fn check_table_or_alias(
     }
 }
 
-fn validate_where_expr(
+fn infer_expr_type(
     expr: &Expr,
     sim: &mut Simulator,
     tables: &Vec<SelectTable>,
-) -> Result<(), Error> {
-    // TODO: validate types on expressions.
+    expected: Option<SqlType>,
+) -> Result<SqlType, Error> {
     match expr {
-        Expr::Value(_) => {}
+        Expr::Value(val) => match val.value.clone() {
+            Value::Number(str, _) => {
+                // Initially, try to use the expected type.
+                if let Some(expected_ty) = expected {
+                    match expected_ty {
+                        SqlType::SmallInt => {
+                            if str.parse::<i16>().is_ok() {
+                                return Ok(SqlType::SmallInt);
+                            }
+                        }
+                        SqlType::Integer => {
+                            if str.parse::<i32>().is_ok() {
+                                return Ok(SqlType::Integer);
+                            }
+                        }
+                        SqlType::BigInt => {
+                            if str.parse::<i64>().is_ok() {
+                                return Ok(SqlType::BigInt);
+                            }
+                        }
+                        SqlType::Float => {
+                            if str.parse::<f32>().is_ok() {
+                                return Ok(SqlType::Float);
+                            }
+                        }
+                        SqlType::Double => {
+                            if str.parse::<f64>().is_ok() {
+                                return Ok(SqlType::Float);
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+
+                // Fallback to smallest type to biggest.
+                if str.parse::<i16>().is_ok() {
+                    Ok(SqlType::SmallInt)
+                } else if str.parse::<i32>().is_ok() {
+                    Ok(SqlType::Integer)
+                } else if str.parse::<i64>().is_ok() {
+                    Ok(SqlType::BigInt)
+                } else if str.contains('.') || str.to_lowercase().contains('e') {
+                    if str.parse::<f32>().is_ok() {
+                        Ok(SqlType::Float)
+                    } else if str.parse::<f64>().is_ok() {
+                        Ok(SqlType::Double)
+                    } else {
+                        Err(Error::Sql("Invalid floating point number".to_string()))
+                    }
+                } else {
+                    // Integer that's too large for i64
+                    Err(Error::Sql("Number is too big".to_string()))
+                }
+            }
+            Value::SingleQuotedString(_)
+            | Value::DollarQuotedString(_)
+            | Value::SingleQuotedByteStringLiteral(_)
+            | Value::DoubleQuotedByteStringLiteral(_)
+            | Value::NationalStringLiteral(_)
+            | Value::HexStringLiteral(_)
+            | Value::DoubleQuotedString(_) => Ok(SqlType::Text),
+            Value::Boolean(_) => Ok(SqlType::Boolean),
+            Value::Null => Ok(SqlType::Null),
+            Value::Placeholder(_) => todo!(),
+            _ => todo!(),
+        },
         Expr::IsTrue(expr)
         | Expr::IsNotTrue(expr)
         | Expr::IsFalse(expr)
         | Expr::IsNotFalse(expr)
-        | Expr::IsNull(expr)
-        | Expr::IsNotNull(expr)
         | Expr::IsUnknown(expr)
         | Expr::IsNotUnknown(expr) => {
-            validate_where_expr(expr, sim, tables)?;
+            let ty = infer_expr_type(expr, sim, tables, Some(SqlType::Boolean))?;
+            if ty != SqlType::Boolean {
+                return Err(Error::TypeMismatch {
+                    expected: SqlType::Boolean,
+                    got: ty,
+                });
+            }
+
+            Ok(SqlType::Boolean)
         }
-        Expr::IsDistinctFrom(left, right) | Expr::IsNotDistinctFrom(left, right) => {
-            validate_where_expr(left, sim, tables)?;
-            validate_where_expr(right, sim, tables)?;
+
+        Expr::IsNull(expr) | Expr::IsNotNull(expr) => {
+            _ = infer_expr_type(expr, sim, tables, expected)?;
+            Ok(SqlType::Boolean)
         }
         Expr::Identifier(ident) => {
             let name = &ident.value;
 
-            if !has_unqualified_column(sim, tables, name)? {
-                return Err(Error::ColumnDoesntExist(name.to_string()));
-            }
+            let column = get_unqualified_column(sim, tables, name)?
+                .ok_or(Error::ColumnDoesntExist(name.to_string()))?;
+
+            Ok(column.ty)
         }
         Expr::CompoundIdentifier(idents) => {
             // validate that identifier is a column.
@@ -107,13 +183,13 @@ fn validate_where_expr(
 
             match check_table_or_alias(table_or_alias, tables)? {
                 TableOrAlias::Table => {
-                    if !sim
+                    let column = sim
                         .get_table(table_or_alias)
                         .unwrap()
-                        .has_column(column_name)
-                    {
-                        return Err(Error::ColumnDoesntExist(column_name.to_string()));
-                    }
+                        .get_column(column_name)
+                        .ok_or_else(|| Error::ColumnDoesntExist(column_name.to_string()))?;
+
+                    Ok(column.ty.clone())
                 }
                 TableOrAlias::Alias => {
                     let table_name = &tables
@@ -122,70 +198,164 @@ fn validate_where_expr(
                         .ok_or(Error::AliasDoesntExist(table_or_alias.to_string()))?
                         .name;
 
-                    if !sim.get_table(table_name).unwrap().has_column(column_name) {
-                        return Err(Error::ColumnDoesntExist(column_name.to_string()));
-                    }
+                    let column = sim
+                        .get_table(table_name)
+                        .unwrap()
+                        .get_column(column_name)
+                        .ok_or_else(|| Error::ColumnDoesntExist(column_name.to_string()))?;
+
+                    Ok(column.ty.clone())
                 }
             }
         }
-        Expr::AnyOp { left, right, .. } => {
-            validate_where_expr(left, sim, tables)?;
-            validate_where_expr(right, sim, tables)?;
-        }
-        Expr::AllOp { left, right, .. } => {
-            validate_where_expr(left, sim, tables)?;
-            validate_where_expr(right, sim, tables)?;
-        }
-        Expr::BinaryOp { left, right, .. } => {
-            validate_where_expr(left, sim, tables)?;
-            validate_where_expr(right, sim, tables)?;
-        }
-        Expr::UnaryOp { expr, .. } => {
-            validate_where_expr(expr, sim, tables)?;
-        }
-        Expr::Nested(expr) => {
-            validate_where_expr(expr, sim, tables)?;
-        }
-        Expr::InList { expr, list, .. } => {
-            validate_where_expr(expr, sim, tables)?;
-            for item in list {
-                validate_where_expr(item, sim, tables)?;
+        Expr::BinaryOp { left, right, op } => {
+            let left_ty = infer_expr_type(left, sim, tables, expected)?;
+            let right_ty = infer_expr_type(right, sim, tables, Some(left_ty.clone()))?;
+
+            match op {
+                BinaryOperator::Plus
+                | BinaryOperator::Minus
+                | BinaryOperator::Multiply
+                | BinaryOperator::Divide
+                | BinaryOperator::Modulo => {
+                    if left_ty != right_ty {
+                        return Err(Error::TypeMismatch {
+                            expected: left_ty,
+                            got: right_ty,
+                        });
+                    }
+
+                    Ok(left_ty)
+                }
+                BinaryOperator::Gt
+                | BinaryOperator::Lt
+                | BinaryOperator::GtEq
+                | BinaryOperator::LtEq => {
+                    if left_ty != right_ty {
+                        return Err(Error::TypeMismatch {
+                            expected: left_ty,
+                            got: right_ty,
+                        });
+                    }
+
+                    Ok(SqlType::Boolean)
+                }
+
+                BinaryOperator::StringConcat => todo!(),
+                BinaryOperator::Spaceship => todo!(),
+                BinaryOperator::Eq | BinaryOperator::NotEq => {
+                    if left_ty != right_ty {
+                        return Err(Error::TypeMismatch {
+                            expected: left_ty,
+                            got: right_ty,
+                        });
+                    }
+
+                    Ok(SqlType::Boolean)
+                }
+                BinaryOperator::And | BinaryOperator::Or | BinaryOperator::Xor => {
+                    if left_ty != SqlType::Boolean {
+                        return Err(Error::TypeMismatch {
+                            expected: SqlType::Boolean,
+                            got: left_ty,
+                        });
+                    }
+                    if right_ty != SqlType::Boolean {
+                        return Err(Error::TypeMismatch {
+                            expected: SqlType::Boolean,
+                            got: right_ty,
+                        });
+                    }
+
+                    Ok(SqlType::Boolean)
+                }
+                BinaryOperator::BitwiseOr
+                | BinaryOperator::BitwiseAnd
+                | BinaryOperator::BitwiseXor => {
+                    if !matches!(
+                        left_ty,
+                        SqlType::SmallInt | SqlType::Integer | SqlType::BigInt
+                    ) {
+                        return Err(Error::TypeMismatch {
+                            expected: SqlType::Integer,
+                            got: left_ty,
+                        });
+                    }
+
+                    if left_ty != right_ty {
+                        return Err(Error::TypeMismatch {
+                            expected: left_ty,
+                            got: right_ty,
+                        });
+                    }
+
+                    Ok(left_ty)
+                }
+                _ => {
+                    todo!()
+                }
             }
         }
-        Expr::Case {
-            operand,
-            conditions,
-            else_result,
+        Expr::UnaryOp { expr, op } => {
+            let ty = infer_expr_type(expr, sim, tables, expected)?;
+
+            match op {
+                UnaryOperator::Plus | UnaryOperator::Minus => {
+                    if !ty.is_numeric() {
+                        Err(Error::TypeNotNumeric(ty))
+                    } else {
+                        Ok(ty)
+                    }
+                }
+                UnaryOperator::Not => {
+                    if ty != SqlType::Boolean {
+                        Err(Error::TypeMismatch {
+                            expected: SqlType::Boolean,
+                            got: ty,
+                        })
+                    } else {
+                        Ok(SqlType::Boolean)
+                    }
+                }
+                _ => todo!(),
+            }
+        }
+        Expr::Nested(expr) => infer_expr_type(expr, sim, tables, expected),
+        Expr::InList { expr, list, .. } => {
+            let ty = infer_expr_type(expr, sim, tables, expected)?;
+            for item in list {
+                let item_ty = infer_expr_type(item, sim, tables, Some(ty.clone()))?;
+                if ty != item_ty {
+                    return Err(Error::TypeMismatch {
+                        expected: ty,
+                        got: item_ty,
+                    });
+                }
+            }
+
+            Ok(SqlType::Boolean)
+        }
+        Expr::Cast {
+            kind,
+            expr,
+            data_type,
             ..
         } => {
-            if let Some(op) = operand {
-                validate_where_expr(op, sim, tables)?;
-            }
+            let ty: SqlType = data_type.clone().into();
+            match kind {
+                CastKind::Cast | CastKind::DoubleColon => {
+                    let _inner_ty = infer_expr_type(expr, sim, tables, Some(ty.clone()))?;
+                    // TODO: Ensure the two types are castable.
 
-            for condition in conditions {
-                validate_where_expr(&condition.condition, sim, tables)?;
-                validate_where_expr(&condition.result, sim, tables)?;
-            }
-
-            if let Some(else_result) = else_result {
-                validate_where_expr(else_result, sim, tables)?;
+                    Ok(ty)
+                }
+                _ => todo!(),
             }
         }
-        Expr::Between {
-            expr, low, high, ..
-        } => {
-            validate_where_expr(expr, sim, tables)?;
-            validate_where_expr(low, sim, tables)?;
-            validate_where_expr(high, sim, tables)?;
-        }
-        _ => {
-            return Err(Error::Unsupported(format!(
-                "Unsupported WHERE expr: {expr:#?}"
-            )));
-        }
+        _ => Err(Error::Unsupported(format!(
+            "Unsupported WHERE expr: {expr:#?}"
+        ))),
     }
-
-    Ok(())
 }
 
 /// This checks through all of the tables to:
@@ -217,6 +387,30 @@ fn has_unqualified_column(
     }
 
     Ok(column_found)
+}
+
+fn get_unqualified_column(
+    sim: &Simulator,
+    tables: &[SelectTable],
+    column: &str,
+) -> Result<Option<Column>, Error> {
+    let mut found_column: Option<Column> = None;
+
+    for table in tables {
+        if let Some(col) = sim
+            .get_table(&table.name)
+            .expect("The table must exist here")
+            .get_column(column)
+        {
+            match found_column {
+                // Ensure that the unqualified column is unique.
+                Some(_) => return Err(Error::AmbigiousColumn(column.to_string())),
+                None => found_column = Some(col.clone()),
+            }
+        };
+    }
+
+    Ok(found_column)
 }
 
 pub fn handle_select_query(sim: &mut Simulator, select: &Select) -> Result<(), Error> {
@@ -391,7 +585,7 @@ pub fn handle_select_query(sim: &mut Simulator, select: &Select) -> Result<(), E
 
     // Validate WHERE clause.
     if let Some(selection) = &select.selection {
-        validate_where_expr(selection, sim, &tables)?;
+        infer_expr_type(selection, sim, &tables, Some(SqlType::Boolean))?;
     }
 
     Ok(())
@@ -722,8 +916,15 @@ mod tests {
         let mut sim = Simulator::new(Box::new(GenericDialect {}));
         sim.execute("create table person (id int, name text, age int)")
             .unwrap();
-        sim.execute("select name from person where ((age > 18 AND age < 65) OR name = 'Admin' or (name is null or age is not null))")
-            .unwrap();
+        sim.execute(
+            r#"
+                select name from person where
+                    ((age > 18 AND age < 65)
+                    OR name = 'Admin'
+                    or (name is null or age is not null))
+            "#,
+        )
+        .unwrap();
     }
 
     #[test]
@@ -756,6 +957,150 @@ mod tests {
         assert_eq!(
             sim.execute("select name from person p where x.id = 1"),
             Err(Error::TableOrAliasDoesntExist("x".to_string()))
+        );
+    }
+
+    #[test]
+    fn select_where_invalid_type() {
+        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        sim.execute("create table person (id int, name text)")
+            .unwrap();
+        assert_eq!(
+            sim.execute("select name from person p where p.id = false"),
+            Err(Error::TypeMismatch {
+                expected: SqlType::Integer,
+                got: SqlType::Boolean
+            })
+        );
+    }
+
+    #[test]
+    fn select_where_invalid_type_string_with_int() {
+        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        sim.execute("create table person (id int, name text)")
+            .unwrap();
+        assert_eq!(
+            sim.execute("select name from person where id = 'hello'"),
+            Err(Error::TypeMismatch {
+                expected: SqlType::Integer,
+                got: SqlType::Text
+            })
+        );
+    }
+
+    #[test]
+    fn select_where_invalid_type_bool_with_text() {
+        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        sim.execute("create table person (id int, name text)")
+            .unwrap();
+        assert_eq!(
+            sim.execute("select name from person where name = true"),
+            Err(Error::TypeMismatch {
+                expected: SqlType::Text,
+                got: SqlType::Boolean
+            })
+        );
+    }
+
+    #[test]
+    fn select_where_invalid_type_int_with_bool() {
+        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        sim.execute("create table person (active bool)").unwrap();
+        assert_eq!(
+            sim.execute("select * from person where active = 123"),
+            Err(Error::TypeMismatch {
+                expected: SqlType::Boolean,
+                got: SqlType::SmallInt
+            })
+        );
+    }
+
+    #[test]
+    fn select_where_invalid_type_arithmetic() {
+        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        sim.execute("create table person (id int)").unwrap();
+        assert_eq!(
+            sim.execute("select * from person where id + 'hello' > 10"),
+            Err(Error::TypeMismatch {
+                expected: SqlType::Integer,
+                got: SqlType::Text
+            })
+        );
+    }
+
+    #[test]
+    fn select_where_invalid_type_comparison() {
+        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        sim.execute("create table person (id int)").unwrap();
+        assert_eq!(
+            sim.execute("select * from person where id > 'five'"),
+            Err(Error::TypeMismatch {
+                expected: SqlType::Integer,
+                got: SqlType::Text
+            })
+        );
+    }
+
+    #[test]
+    fn select_where_invalid_type_logical_and() {
+        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        sim.execute("create table person (id int, active bool)")
+            .unwrap();
+        assert_eq!(
+            sim.execute("select * from person where active AND id"),
+            Err(Error::TypeMismatch {
+                expected: SqlType::Boolean,
+                got: SqlType::Integer
+            })
+        );
+    }
+
+    #[test]
+    fn select_where_invalid_type_not_operator() {
+        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        sim.execute("create table person (id int)").unwrap();
+        assert_eq!(
+            sim.execute("select * from person where NOT id"),
+            Err(Error::TypeMismatch {
+                expected: SqlType::Boolean,
+                got: SqlType::Integer
+            })
+        );
+    }
+
+    #[test]
+    fn select_where_invalid_type_unary_minus() {
+        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        sim.execute("create table person (active bool)").unwrap();
+        assert_eq!(
+            sim.execute("select * from person where -active"),
+            Err(Error::TypeNotNumeric(SqlType::Boolean))
+        );
+    }
+
+    #[test]
+    fn select_where_invalid_type_in_list() {
+        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        sim.execute("create table person (id int)").unwrap();
+        assert_eq!(
+            sim.execute("select * from person where id IN (1, 'two', 3)"),
+            Err(Error::TypeMismatch {
+                expected: SqlType::Integer,
+                got: SqlType::Text
+            })
+        );
+    }
+
+    #[test]
+    fn select_where_invalid_type_is_true() {
+        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        sim.execute("create table person (id int)").unwrap();
+        assert_eq!(
+            sim.execute("select * from person where id IS TRUE"),
+            Err(Error::TypeMismatch {
+                expected: SqlType::Boolean,
+                got: SqlType::Integer
+            })
         );
     }
 }
