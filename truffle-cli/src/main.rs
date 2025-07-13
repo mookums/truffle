@@ -51,12 +51,22 @@ fn main() {
                             let mut pieces = line.split_terminator(' ');
                             match pieces.next().unwrap() {
                                 ".help" => {
-                                    println!("    .tables -> prints out of all of the tables");
+                                    println!("    .tables -> prints the tables");
+                                    println!("    .constraints <TABLE> -> prints constraints");
                                     println!("    .import <PATH> -> executes file at the path");
                                     println!("    .exit -> exit (can also ctrl+c)");
                                 }
                                 ".tables" => {
                                     println!("{:#?}", sim.get_tables());
+                                }
+                                ".constraints" => {
+                                    if let Some(table) = pieces.next()
+                                        && let Some(table) = sim.get_table(table)
+                                    {
+                                        println!("{:#?}", table.get_all_constraints());
+                                    } else {
+                                        println!("invalid table for constraints");
+                                    }
                                 }
                                 ".import" => {
                                     if let Some(path) = pieces.next()
