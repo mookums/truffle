@@ -65,6 +65,12 @@ impl Table {
         self.columns.get(name)
     }
 
+    pub fn get_column_by_index(&self, index: usize) -> Option<(&str, &Column)> {
+        self.columns
+            .get_index(index)
+            .map(|(key, value)| (key.as_str(), value))
+    }
+
     pub fn insert_constraint(&mut self, columns: &[impl ToString], constraint: Constraint) {
         let columns: Vec<String> = columns.iter().map(|c| c.to_string()).collect();
         let key = Table::create_compound_key(&columns);

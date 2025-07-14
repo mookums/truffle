@@ -135,16 +135,16 @@ fn check_table_or_alias(tables: &[SelectTable], name: &str) -> Result<TableOrAli
 }
 
 impl Simulator {
-    pub(crate) fn select(&self, select: &Select) -> Result<(), Error> {
+    pub(crate) fn select(&self, sel: &Select) -> Result<(), Error> {
         let mut columns = SelectColumns::List(vec![]);
         let mut tables = vec![];
 
         // Ensure we have a FROM clause.
-        if select.from.is_empty() {
+        if sel.from.is_empty() {
             return Err(Error::Sql("Missing FROM clause on SELECT".to_string()));
         }
 
-        for from in &select.from {
+        for from in &sel.from {
             match &from.relation {
                 TableFactor::Table { name, alias, .. } => {
                     let name = object_name_to_strings(name).first().unwrap().clone();
@@ -172,7 +172,7 @@ impl Simulator {
 
         let inferrer = SelectInferrer { tables: &tables };
 
-        for projection in &select.projection {
+        for projection in &sel.projection {
             match projection {
                 SelectItem::UnnamedExpr(expr) => match expr {
                     Expr::Identifier(ident) => {
@@ -308,7 +308,7 @@ impl Simulator {
         }
 
         // Validate WHERE clause.
-        if let Some(selection) = &select.selection {
+        if let Some(selection) = &sel.selection {
             infer_expr_type(selection, self, Some(SqlType::Boolean), &inferrer)?;
         }
 
