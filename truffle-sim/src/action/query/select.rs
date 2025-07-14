@@ -53,7 +53,7 @@ struct SelectInferrer<'a> {
 impl<'a> ColumnInferrer for SelectInferrer<'a> {
     fn infer_unqualified_type(
         &self,
-        sim: &mut Simulator,
+        sim: &Simulator,
         column: &str,
     ) -> Result<Option<SqlType>, Error> {
         let mut found_column: Option<Column> = None;
@@ -77,7 +77,7 @@ impl<'a> ColumnInferrer for SelectInferrer<'a> {
 
     fn infer_qualified_type(
         &self,
-        sim: &mut Simulator,
+        sim: &Simulator,
         qualifier: &str,
         column: &str,
     ) -> Result<SqlType, Error> {
