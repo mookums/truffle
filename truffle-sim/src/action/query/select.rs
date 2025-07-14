@@ -144,7 +144,10 @@ fn infer_expr_type(
             | Value::DoubleQuotedString(_) => Ok(SqlType::Text),
             Value::Boolean(_) => Ok(SqlType::Boolean),
             Value::Null => Ok(SqlType::Null),
-            Value::Placeholder(_) => todo!(),
+            // Placeholder just takes the type of the expected.
+            Value::Placeholder(_) => expected.ok_or(Error::Unsupported(
+                "Cannot infer type of the placeholder".to_string(),
+            )),
             _ => todo!(),
         },
         Expr::IsTrue(expr)
