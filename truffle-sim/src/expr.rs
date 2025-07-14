@@ -19,7 +19,7 @@ pub trait ColumnInferrer {
 
 pub fn infer_expr_type<I: ColumnInferrer>(
     expr: &Expr,
-    sim: &mut Simulator,
+    sim: &Simulator,
     expected: Option<SqlType>,
     inferrer: &I,
 ) -> Result<SqlType, Error> {
@@ -175,7 +175,7 @@ fn infer_binary_op_type<I: ColumnInferrer>(
     left: &Expr,
     right: &Expr,
     op: &BinaryOperator,
-    sim: &mut Simulator,
+    sim: &Simulator,
     expected: Option<SqlType>,
     inferrer: &I,
 ) -> Result<SqlType, Error> {
@@ -249,7 +249,7 @@ fn infer_binary_op_type<I: ColumnInferrer>(
 fn infer_unary_op_type<I: ColumnInferrer>(
     expr: &Expr,
     op: &UnaryOperator,
-    sim: &mut Simulator,
+    sim: &Simulator,
     expected: Option<SqlType>,
     inferrer: &I,
 ) -> Result<SqlType, Error> {

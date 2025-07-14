@@ -3,27 +3,30 @@ use tracing::{debug, warn};
 
 use crate::{Error, Simulator, object_name_to_strings};
 
-pub fn handle_drop(
-    sim: &mut Simulator,
-    object_type: &ObjectType,
-    names: Vec<ObjectName>,
-) -> Result<(), Error> {
-    if matches!(object_type, ObjectType::Table) {
-        for name in names.iter().flat_map(object_name_to_strings) {
-            // Ensure that the table being dropped exists.
-            if !sim.tables.contains_key(&name) {
-                return Err(Error::TableDoesntExist(name));
+impl Simulator {
+    pub(crate) fn drop(
+        &mut self,
+        object_type: &ObjectType,
+        names: Vec<ObjectName>,
+    ) -> Result<(), Error> {
+        if matches!(object_type, ObjectType::Table) {
+            for name in names.iter().flat_map(object_name_to_strings) {
+                // Ensure that the table being dropped exists.
+                if !self.tables.contains_key(&name) {
+                    return Err(Error::TableDoesntExist(name));
+                }
+
+                debug!(name = %name, "Dropping Table");
+                self.tables.remove(&name);
             }
-
-            debug!(name = %name, "Dropping Table");
-            sim.tables.remove(&name);
+        } else {
+            warn!(object = %object_type, "Unsupported Drop");
         }
-    } else {
-        warn!(object = %object_type, "Unsupported Drop");
-    }
 
-    Ok(())
+        Ok(())
+    }
 }
+
 #[cfg(test)]
 mod tests {
     use crate::*;

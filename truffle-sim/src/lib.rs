@@ -4,10 +4,9 @@ mod expr;
 mod table;
 mod ty;
 
-use action::{create_table::handle_create_table, drop::handle_drop, query::handle_query};
 pub use sqlparser::dialect::*;
 use sqlparser::{
-    ast::{ObjectName, Statement},
+    ast::{ObjectName, Statement, helpers::stmt_data_loading::StageLoadSelectItem},
     parser::Parser,
 };
 use ty::SqlType;
@@ -95,12 +94,14 @@ impl Simulator {
 
         for statement in statements {
             match statement {
-                Statement::CreateTable(create_table) => handle_create_table(self, create_table)?,
-                Statement::Query(query) => handle_query(self, query)?,
+                Statement::CreateTable(create_table) => self.create_table(create_table)?,
+                // TODO: Support Alter Table
+                Statement::Query(query) => self.query(query)?,
                 // TODO: Support Insert
+                // TODO: Support Delete
                 Statement::Drop {
                     object_type, names, ..
-                } => handle_drop(self, &object_type, names)?,
+                } => self.drop(&object_type, names)?,
                 _ => return Err(Error::Unsupported(statement.to_string())),
             }
         }

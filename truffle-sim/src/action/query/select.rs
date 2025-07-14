@@ -134,184 +134,186 @@ fn check_table_or_alias(tables: &[SelectTable], name: &str) -> Result<TableOrAli
     }
 }
 
-pub fn handle_select_query(sim: &mut Simulator, select: &Select) -> Result<(), Error> {
-    let mut columns = SelectColumns::List(vec![]);
-    let mut tables = vec![];
+impl Simulator {
+    pub(crate) fn select(&self, select: &Select) -> Result<(), Error> {
+        let mut columns = SelectColumns::List(vec![]);
+        let mut tables = vec![];
 
-    // Ensure we have a FROM clause.
-    if select.from.is_empty() {
-        return Err(Error::Sql("Missing FROM clause on SELECT".to_string()));
-    }
-
-    for from in &select.from {
-        match &from.relation {
-            TableFactor::Table { name, alias, .. } => {
-                let name = object_name_to_strings(name).first().unwrap().clone();
-                let alias = alias.as_ref().map(|a| a.name.value.clone());
-
-                // Ensure the table exists.
-                if !sim.tables.contains_key(&name) {
-                    return Err(Error::TableDoesntExist(name));
-                }
-
-                // Ensure that the alias isn't a table name.
-                if let Some(alias) = &alias {
-                    if sim.has_table(alias) {
-                        return Err(Error::AliasIsTableName(alias.to_string()));
-                    }
-                }
-
-                tables.push(SelectTable { name, alias });
-            }
-            _ => {
-                warn!(relation = %from.relation, "Unsupported Select Relation");
-            }
+        // Ensure we have a FROM clause.
+        if select.from.is_empty() {
+            return Err(Error::Sql("Missing FROM clause on SELECT".to_string()));
         }
-    }
 
-    let inferrer = SelectInferrer { tables: &tables };
+        for from in &select.from {
+            match &from.relation {
+                TableFactor::Table { name, alias, .. } => {
+                    let name = object_name_to_strings(name).first().unwrap().clone();
+                    let alias = alias.as_ref().map(|a| a.name.value.clone());
 
-    for projection in &select.projection {
-        match projection {
-            SelectItem::UnnamedExpr(expr) => match expr {
-                Expr::Identifier(ident) => {
-                    let value = ident.value.clone();
+                    // Ensure the table exists.
+                    if !self.tables.contains_key(&name) {
+                        return Err(Error::TableDoesntExist(name));
+                    }
 
-                    columns
-                        .expect_list_mut()
-                        .push(SelectColumn::Unqualified(value));
-                }
-                Expr::CompoundIdentifier(idents) => {
-                    let table_or_alias = &idents.first().unwrap().value;
-                    let column_name = &idents.get(1).unwrap().value;
-
-                    match check_table_or_alias(&tables, table_or_alias)? {
-                        TableOrAlias::Table => {
-                            columns.expect_list_mut().push(SelectColumn::Absolute {
-                                table: table_or_alias.to_string(),
-                                column: column_name.to_string(),
-                            });
-                        }
-                        TableOrAlias::Alias => {
-                            columns.expect_list_mut().push(SelectColumn::Aliased {
-                                alias: table_or_alias.to_string(),
-                                column: column_name.to_string(),
-                            });
+                    // Ensure that the alias isn't a table name.
+                    if let Some(alias) = &alias {
+                        if self.has_table(alias) {
+                            return Err(Error::AliasIsTableName(alias.to_string()));
                         }
                     }
+
+                    tables.push(SelectTable { name, alias });
                 }
                 _ => {
+                    warn!(relation = %from.relation, "Unsupported Select Relation");
+                }
+            }
+        }
+
+        let inferrer = SelectInferrer { tables: &tables };
+
+        for projection in &select.projection {
+            match projection {
+                SelectItem::UnnamedExpr(expr) => match expr {
+                    Expr::Identifier(ident) => {
+                        let value = ident.value.clone();
+
+                        columns
+                            .expect_list_mut()
+                            .push(SelectColumn::Unqualified(value));
+                    }
+                    Expr::CompoundIdentifier(idents) => {
+                        let table_or_alias = &idents.first().unwrap().value;
+                        let column_name = &idents.get(1).unwrap().value;
+
+                        match check_table_or_alias(&tables, table_or_alias)? {
+                            TableOrAlias::Table => {
+                                columns.expect_list_mut().push(SelectColumn::Absolute {
+                                    table: table_or_alias.to_string(),
+                                    column: column_name.to_string(),
+                                });
+                            }
+                            TableOrAlias::Alias => {
+                                columns.expect_list_mut().push(SelectColumn::Aliased {
+                                    alias: table_or_alias.to_string(),
+                                    column: column_name.to_string(),
+                                });
+                            }
+                        }
+                    }
+                    _ => {
+                        return Err(Error::Unsupported(format!(
+                            "Unsupported Select Expr: {expr:?}"
+                        )));
+                    }
+                },
+                SelectItem::ExprWithAlias { expr, alias } => {
                     return Err(Error::Unsupported(format!(
-                        "Unsupported Select Expr: {expr:?}"
+                        "Unsupported Select Expr with Alias: expr={expr}, alias={alias}"
                     )));
                 }
-            },
-            SelectItem::ExprWithAlias { expr, alias } => {
-                return Err(Error::Unsupported(format!(
-                    "Unsupported Select Expr with Alias: expr={expr}, alias={alias}"
-                )));
-            }
-            SelectItem::QualifiedWildcard(kind, _) => match kind {
-                SelectItemQualifiedWildcardKind::ObjectName(name) => {
-                    let table_or_alias = object_name_to_strings(name).first().unwrap().clone();
+                SelectItem::QualifiedWildcard(kind, _) => match kind {
+                    SelectItemQualifiedWildcardKind::ObjectName(name) => {
+                        let table_or_alias = object_name_to_strings(name).first().unwrap().clone();
 
-                    match check_table_or_alias(&tables, &table_or_alias)? {
-                        TableOrAlias::Table => {
-                            columns
-                                .expect_list_mut()
-                                .push(SelectColumn::AbsoluteWildcard(table_or_alias));
-                        }
-                        TableOrAlias::Alias => {
-                            columns
-                                .expect_list_mut()
-                                .push(SelectColumn::AliasedWildcard(table_or_alias));
+                        match check_table_or_alias(&tables, &table_or_alias)? {
+                            TableOrAlias::Table => {
+                                columns
+                                    .expect_list_mut()
+                                    .push(SelectColumn::AbsoluteWildcard(table_or_alias));
+                            }
+                            TableOrAlias::Alias => {
+                                columns
+                                    .expect_list_mut()
+                                    .push(SelectColumn::AliasedWildcard(table_or_alias));
+                            }
                         }
                     }
-                }
-                SelectItemQualifiedWildcardKind::Expr(_) => {
-                    return Err(Error::Unsupported(
-                        "Expression as qualifier for wildcard in SELECT".to_string(),
-                    ));
-                }
-            },
-            SelectItem::Wildcard(_) => {
-                columns = SelectColumns::Wildcard;
-                break;
-            }
-        }
-    }
-
-    match columns {
-        SelectColumns::Wildcard => {
-            let mut column_names = HashSet::new();
-            for table in &tables {
-                let table = sim.get_table(&table.name).expect("The table must exist");
-                for column in table.columns.iter().map(|c| c.0) {
-                    if !column_names.insert(column) {
-                        return Err(Error::AmbigiousColumn(column.to_string()));
+                    SelectItemQualifiedWildcardKind::Expr(_) => {
+                        return Err(Error::Unsupported(
+                            "Expression as qualifier for wildcard in SELECT".to_string(),
+                        ));
                     }
+                },
+                SelectItem::Wildcard(_) => {
+                    columns = SelectColumns::Wildcard;
+                    break;
                 }
             }
         }
-        SelectColumns::List(list) => {
-            for column in list.into_iter() {
-                match column {
-                    SelectColumn::Unqualified(column) => {
-                        if inferrer.infer_unqualified_type(sim, &column)?.is_none() {
-                            return Err(Error::ColumnDoesntExist(column));
-                        }
-                    }
-                    SelectColumn::Absolute { table, column } => {
-                        if !sim
-                            .get_table(&table)
-                            .expect("The table must exist")
-                            .has_column(&column)
-                        {
-                            return Err(Error::ColumnDoesntExist(column));
-                        }
-                    }
-                    SelectColumn::Aliased { alias, column } => {
-                        let table_name = tables
-                            .iter()
-                            .find(|t| t.alias.as_ref().is_some_and(|a| a == &alias))
-                            .map(|t| &t.name)
-                            .ok_or(Error::AliasDoesntExist(alias))?;
 
-                        let table = sim
-                            .get_table(table_name)
-                            .ok_or_else(|| Error::TableDoesntExist(table_name.to_string()))?;
-
-                        if !table.has_column(&column) {
-                            return Err(Error::ColumnDoesntExist(column));
+        match columns {
+            SelectColumns::Wildcard => {
+                let mut column_names = HashSet::new();
+                for table in &tables {
+                    let table = self.get_table(&table.name).expect("The table must exist");
+                    for column in table.columns.iter().map(|c| c.0) {
+                        if !column_names.insert(column) {
+                            return Err(Error::AmbigiousColumn(column.to_string()));
                         }
                     }
-                    SelectColumn::AliasedWildcard(alias) => {
-                        let table_name = tables
-                            .iter()
-                            .find(|t| t.alias.as_ref().is_some_and(|a| a == &alias))
-                            .map(|t| &t.name)
-                            .ok_or(Error::AliasDoesntExist(alias))?;
-
-                        if sim.get_table(table_name).is_none() {
-                            return Err(Error::TableDoesntExist(table_name.clone()));
+                }
+            }
+            SelectColumns::List(list) => {
+                for column in list.into_iter() {
+                    match column {
+                        SelectColumn::Unqualified(column) => {
+                            if inferrer.infer_unqualified_type(self, &column)?.is_none() {
+                                return Err(Error::ColumnDoesntExist(column));
+                            }
                         }
-                    }
-                    SelectColumn::AbsoluteWildcard(table) => {
-                        if sim.get_table(&table).is_none() {
-                            return Err(Error::TableDoesntExist(table));
+                        SelectColumn::Absolute { table, column } => {
+                            if !self
+                                .get_table(&table)
+                                .expect("The table must exist")
+                                .has_column(&column)
+                            {
+                                return Err(Error::ColumnDoesntExist(column));
+                            }
+                        }
+                        SelectColumn::Aliased { alias, column } => {
+                            let table_name = tables
+                                .iter()
+                                .find(|t| t.alias.as_ref().is_some_and(|a| a == &alias))
+                                .map(|t| &t.name)
+                                .ok_or(Error::AliasDoesntExist(alias))?;
+
+                            let table = self
+                                .get_table(table_name)
+                                .ok_or_else(|| Error::TableDoesntExist(table_name.to_string()))?;
+
+                            if !table.has_column(&column) {
+                                return Err(Error::ColumnDoesntExist(column));
+                            }
+                        }
+                        SelectColumn::AliasedWildcard(alias) => {
+                            let table_name = tables
+                                .iter()
+                                .find(|t| t.alias.as_ref().is_some_and(|a| a == &alias))
+                                .map(|t| &t.name)
+                                .ok_or(Error::AliasDoesntExist(alias))?;
+
+                            if self.get_table(table_name).is_none() {
+                                return Err(Error::TableDoesntExist(table_name.clone()));
+                            }
+                        }
+                        SelectColumn::AbsoluteWildcard(table) => {
+                            if self.get_table(&table).is_none() {
+                                return Err(Error::TableDoesntExist(table));
+                            }
                         }
                     }
                 }
             }
         }
-    }
 
-    // Validate WHERE clause.
-    if let Some(selection) = &select.selection {
-        infer_expr_type(selection, sim, Some(SqlType::Boolean), &inferrer)?;
-    }
+        // Validate WHERE clause.
+        if let Some(selection) = &select.selection {
+            infer_expr_type(selection, self, Some(SqlType::Boolean), &inferrer)?;
+        }
 
-    Ok(())
+        Ok(())
+    }
 }
 
 #[cfg(test)]
