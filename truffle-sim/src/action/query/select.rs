@@ -101,7 +101,7 @@ impl<'a> ColumnInferrer for SelectInferrer<'a> {
                     .tables
                     .iter()
                     .find(|t| t.alias.as_ref().is_some_and(|a| a == qualifier))
-                    .ok_or(Error::AliasDoesntExist(qualifier.to_string()))?
+                    .ok_or_else(|| Error::AliasDoesntExist(qualifier.to_string()))?
                     .name;
 
                 let column = sim
@@ -279,7 +279,7 @@ pub fn handle_select_query(sim: &mut Simulator, select: &Select) -> Result<(), E
 
                         let table = sim
                             .get_table(table_name)
-                            .ok_or(Error::TableDoesntExist(table_name.to_string()))?;
+                            .ok_or_else(|| Error::TableDoesntExist(table_name.to_string()))?;
 
                         if !table.has_column(&column) {
                             return Err(Error::ColumnDoesntExist(column));

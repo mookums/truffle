@@ -47,6 +47,8 @@ pub enum Error {
     NullOnNotNullColumn(String),
     #[error("Cannot set not default column '{0}' to default value")]
     DefaultOnNotDefaultColumn(String),
+    #[error("{0} cannot be used as a default. Use a literal value.")]
+    InvalidDefault(String),
     #[error("'{0}' is currently unsupported")]
     Unsupported(String),
 }

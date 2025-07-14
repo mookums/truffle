@@ -51,7 +51,7 @@ pub fn infer_expr_type<I: ColumnInferrer>(
 
             Ok(inferrer
                 .infer_unqualified_type(sim, name)?
-                .ok_or(Error::ColumnDoesntExist(name.to_string()))?)
+                .ok_or_else(|| Error::ColumnDoesntExist(name.to_string()))?)
         }
         Expr::CompoundIdentifier(idents) => {
             // validate that identifier is a column.

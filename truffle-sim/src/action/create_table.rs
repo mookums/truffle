@@ -4,10 +4,26 @@ use tracing::debug;
 use crate::{
     Error, Simulator,
     column::Column,
+    expr::{ColumnInferrer, infer_expr_type},
     object_name_to_strings,
     table::{Constraint, Table},
     ty::SqlType,
 };
+
+struct CreateTableInferrer;
+impl ColumnInferrer for CreateTableInferrer {
+    fn infer_unqualified_type(
+        &self,
+        _: &Simulator,
+        column: &str,
+    ) -> Result<Option<SqlType>, Error> {
+        Err(Error::InvalidDefault(column.to_string()))
+    }
+
+    fn infer_qualified_type(&self, _: &Simulator, _: &str, column: &str) -> Result<SqlType, Error> {
+        Err(Error::InvalidDefault(column.to_string()))
+    }
+}
 
 pub fn handle_create_table(sim: &mut Simulator, create_table: CreateTable) -> Result<(), Error> {
     let name = object_name_to_strings(&create_table.name).pop().unwrap();
@@ -34,9 +50,15 @@ pub fn handle_create_table(sim: &mut Simulator, create_table: CreateTable) -> Re
                     nullable = false;
                 }
                 ColumnOption::Default(expr) => {
-                    // TODO: Verify the type of the expr is correct.
-                    // TODO: Verify that the expr is correct.
-                    _ = expr;
+                    let inferrer = CreateTableInferrer {};
+                    let default_ty = infer_expr_type(&expr, sim, Some(ty.clone()), &inferrer)?;
+                    if ty != default_ty {
+                        return Err(Error::TypeMismatch {
+                            expected: ty,
+                            got: default_ty,
+                        });
+                    }
+
                     default = true;
                 }
                 ColumnOption::Unique { is_primary, .. } => {
@@ -666,5 +688,30 @@ mod tests {
             .unwrap();
 
         assert!(sim.get_table("person").unwrap().is_unique(&["name"]))
+    }
+
+    #[test]
+    fn create_table_with_default_value_type_mismatch() {
+        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        assert_eq!(
+            sim.execute(
+                "create table person (id uuid primary key, name text default 123, unique(name));",
+            ),
+            Err(Error::TypeMismatch {
+                expected: SqlType::Text,
+                got: SqlType::SmallInt
+            })
+        )
+    }
+
+    #[test]
+    fn create_table_with_default_value_column_name() {
+        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        assert_eq!(
+            sim.execute(
+                "create table person (id uuid primary key, name text, nickname text default name, unique(name));",
+            ),
+            Err(Error::InvalidDefault("name".to_string()))
+        )
     }
 }

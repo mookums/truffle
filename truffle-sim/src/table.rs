@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet, hash_map::Entry};
 
+use indexmap::IndexMap;
 use sqlparser::ast::ReferentialAction;
 
 use crate::column::Column;
@@ -47,7 +48,7 @@ impl Constraint {
 
 #[derive(Debug, Default)]
 pub struct Table {
-    pub columns: HashMap<String, Column>,
+    pub columns: IndexMap<String, Column>,
     pub constraints: HashMap<String, HashSet<Constraint>>,
 }
 

@@ -10,3 +10,4 @@ tracing-subscriber.workspace = true
 thiserror.workspace = true
 
 sqlparser = "0.57.0"
+indexmap = "2.10.0"
