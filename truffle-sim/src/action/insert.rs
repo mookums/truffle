@@ -1,10 +1,6 @@
 use sqlparser::ast::{Insert, SetExpr, TableObject};
 
-use crate::{
-    Error, Simulator,
-    expr::{ColumnInferrer, infer_expr_type},
-    object_name_to_strings,
-};
+use crate::{Error, Simulator, expr::ColumnInferrer, object_name_to_strings};
 
 struct InsertInferrer {}
 
@@ -82,7 +78,7 @@ impl Simulator {
                             // Implicit (Table Index) Columns.
                             let expr = &row[i];
                             let ty =
-                                infer_expr_type(expr, self, Some(column.ty.clone()), &inferrer)?;
+                                self.infer_expr_type(expr, Some(column.ty.clone()), &inferrer)?;
 
                             if column.ty != ty {
                                 return Err(Error::TypeMismatch {
@@ -97,7 +93,7 @@ impl Simulator {
                             let expr = &row[index];
 
                             let ty =
-                                infer_expr_type(expr, self, Some(column.ty.clone()), &inferrer)?;
+                                self.infer_expr_type(expr, Some(column.ty.clone()), &inferrer)?;
 
                             if column.ty != ty {
                                 return Err(Error::TypeMismatch {
