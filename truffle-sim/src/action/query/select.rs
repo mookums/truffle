@@ -873,6 +873,44 @@ mod tests {
     }
 
     #[test]
+    fn select_join_chain_wildcard() {
+        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        sim.execute("create table users (id int primary key, name text)")
+            .unwrap();
+        sim.execute("create table orders (id int primary key, user_id int, product_id int)")
+            .unwrap();
+        sim.execute("create table products (id int primary key, name text)")
+            .unwrap();
+
+        sim.execute(
+            "select o1.*, o2.product_id from
+                users join orders o1 on users.id = orders.user_id,
+                products join orders o2 on products.id = orders.product_id ",
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn select_join_chain_table_out_of_scope() {
+        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        sim.execute("create table users (id int primary key, name text)")
+            .unwrap();
+        sim.execute("create table orders (id int primary key, user_id int, product_id int)")
+            .unwrap();
+        sim.execute("create table products (id int primary key, name text)")
+            .unwrap();
+
+        assert_eq!(
+            sim.execute(
+                "select orders.* from
+                users join orders o on users.id = orders.user_id,
+                products join orders on users.id = orders.product_id ",
+            ),
+            Err(Error::TableOrAliasDoesntExist("users".to_string()))
+        );
+    }
+
+    #[test]
     fn select_join_chain_table_doesnt_exist() {
         let mut sim = Simulator::new(Box::new(GenericDialect {}));
         sim.execute("create table users (id int primary key, name text)")
