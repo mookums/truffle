@@ -1,18 +1,19 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
-use sqlparser::ast::{
-    Expr, JoinConstraint, JoinOperator, Select, SelectItem, SelectItemQualifiedWildcardKind,
-    TableFactor,
-};
+use sqlparser::ast::{Expr, Select, SelectItem, SelectItemQualifiedWildcardKind, TableFactor};
 
 use crate::{
-    Error, Simulator, column::Column, expr::ColumnInferrer, object_name_to_strings, ty::SqlType,
+    Error, Simulator,
+    action::join::{JoinContext, JoinInferrer},
+    expr::ColumnInferrer,
+    object_name_to_strings,
+    ty::SqlType,
 };
 
 impl Simulator {
     pub(crate) fn select(&self, sel: &Select) -> Result<(), Error> {
         let mut columns = SelectColumns::List(vec![]);
-        let mut tables = vec![];
+        let mut contexts = vec![];
 
         // Ensure we have a FROM clause.
         if sel.from.is_empty() {
@@ -26,116 +27,34 @@ impl Simulator {
                 ));
             };
 
-            let name = object_name_to_strings(name).first().unwrap().clone();
-            let alias = alias.as_ref().map(|a| a.name.value.clone());
+            let from_table_name = object_name_to_strings(name).first().unwrap().clone();
+            let from_table_alias = alias.as_ref().map(|a| a.name.value.clone());
 
             // Ensure the table exists.
-            let table = self
-                .get_table(&name)
-                .ok_or_else(|| Error::TableDoesntExist(name.clone()))?;
+            let from_table = self
+                .get_table(&from_table_name)
+                .ok_or_else(|| Error::TableDoesntExist(from_table_name.clone()))?;
 
             // Ensure that the alias isn't a table name.
-            if let Some(alias) = &alias {
+            if let Some(alias) = &from_table_alias {
                 if self.has_table(alias) {
                     return Err(Error::AliasIsTableName(alias.to_string()));
                 }
             }
 
-            tables.push(SelectTable { name, alias });
+            let join_table = self.infer_joins(
+                from_table,
+                &from_table_name,
+                from_table_alias.as_ref(),
+                &from.joins,
+            )?;
 
-            // TODO: This needs to properly track evolving joins.
-            // This means that "table" needs to basically be mutable and represent a
-            // temporary table that is the previous join's result table.
-            //
-            // This currently only supports a single JOIN where the left is the original table.
-            for join in &from.joins {
-                match &join.relation {
-                    TableFactor::Table { name, alias, .. } => {
-                        let name = object_name_to_strings(name).first().unwrap().clone();
-                        let alias = alias.as_ref().map(|a| a.name.value.clone());
-
-                        let right_table = self
-                            .get_table(&name)
-                            .ok_or_else(|| Error::TableDoesntExist(name.clone()))?;
-
-                        if let Some(alias) = &alias {
-                            if self.has_table(alias) {
-                                return Err(Error::AliasIsTableName(alias.to_string()));
-                            }
-                        }
-
-                        tables.push(SelectTable {
-                            name: name.clone(),
-                            alias,
-                        });
-
-                        let inferrer = SelectInferrer { tables: &tables };
-
-                        match &join.join_operator {
-                            JoinOperator::Join(join_constraint)
-                            | JoinOperator::Inner(join_constraint) => match join_constraint {
-                                JoinConstraint::On(expr) => {
-                                    let ty = self.infer_expr_type(
-                                        expr,
-                                        Some(SqlType::Boolean),
-                                        &inferrer,
-                                    )?;
-
-                                    if ty != SqlType::Boolean {
-                                        return Err(Error::TypeMismatch {
-                                            expected: SqlType::Boolean,
-                                            got: ty,
-                                        });
-                                    }
-                                }
-                                JoinConstraint::Using(object_names) => {
-                                    for object_name in object_names {
-                                        let column_name = object_name_to_strings(object_name)
-                                            .first()
-                                            .unwrap()
-                                            .clone();
-
-                                        if inferrer
-                                            .infer_unqualified_type(self, &column_name)?
-                                            .is_none()
-                                        {
-                                            return Err(Error::ColumnDoesntExist(column_name));
-                                        }
-                                    }
-                                }
-                                JoinConstraint::Natural => {
-                                    let mut found_common_column = false;
-                                    for (column_name, column) in &table.columns {
-                                        if let Some(right_column) =
-                                            right_table.get_column(column_name)
-                                        {
-                                            if column.ty == right_column.ty {
-                                                found_common_column = true;
-                                                break;
-                                            } else {
-                                                return Err(Error::TypeMismatch {
-                                                    expected: column.ty.clone(),
-                                                    got: right_column.ty.clone(),
-                                                });
-                                            }
-                                        }
-                                    }
-
-                                    if !found_common_column {
-                                        return Err(Error::NoCommonColumn);
-                                    }
-                                }
-                                JoinConstraint::None => {}
-                            },
-                            _ => todo!(),
-                        }
-                    }
-                    _ => return Err(Error::Unsupported("Unsupported JOIN relation".to_string())),
-                }
-            }
+            contexts.push(join_table);
         }
 
-        let inferrer = SelectInferrer { tables: &tables };
+        let inferrer = JoinInferrer {
+            join_contexts: &contexts,
+        };
 
         for projection in &sel.projection {
             match projection {
@@ -151,7 +70,7 @@ impl Simulator {
                         let table_or_alias = &idents.first().unwrap().value;
                         let column_name = &idents.get(1).unwrap().value;
 
-                        match check_table_or_alias(&tables, table_or_alias)? {
+                        match check_table_or_alias(&contexts, table_or_alias)? {
                             TableOrAlias::Table => {
                                 columns.expect_list_mut().push(SelectColumn::Absolute {
                                     table: table_or_alias.to_string(),
@@ -181,7 +100,7 @@ impl Simulator {
                     SelectItemQualifiedWildcardKind::ObjectName(name) => {
                         let table_or_alias = object_name_to_strings(name).first().unwrap().clone();
 
-                        match check_table_or_alias(&tables, &table_or_alias)? {
+                        match check_table_or_alias(&contexts, &table_or_alias)? {
                             TableOrAlias::Table => {
                                 columns
                                     .expect_list_mut()
@@ -209,12 +128,18 @@ impl Simulator {
 
         match columns {
             SelectColumns::Wildcard => {
-                let mut column_names = HashSet::new();
-                for table in &tables {
-                    let table = self.get_table(&table.name).expect("The table must exist");
-                    for column in table.columns.iter().map(|c| c.0) {
-                        if !column_names.insert(column) {
-                            return Err(Error::AmbigiousColumn(column.to_string()));
+                let mut all_columns: HashMap<String, String> = HashMap::new();
+
+                for context in &contexts {
+                    for (table, columns) in context.tables.iter() {
+                        for col in columns {
+                            if let Some(existing_table) = all_columns.get(col) {
+                                if existing_table != table {
+                                    return Err(Error::AmbiguousColumn(col.to_string()));
+                                }
+                            } else {
+                                all_columns.insert(col.to_string(), table.to_string());
+                            }
                         }
                     }
                 }
@@ -237,28 +162,26 @@ impl Simulator {
                             }
                         }
                         SelectColumn::Aliased { alias, column } => {
-                            let table_name = tables
+                            let table_name = contexts
                                 .iter()
-                                .find(|t| t.alias.as_ref().is_some_and(|a| a == &alias))
-                                .map(|t| &t.name)
+                                .find_map(|c| c.aliases.get(&alias))
                                 .ok_or(Error::AliasDoesntExist(alias))?;
 
-                            let table = self
-                                .get_table(table_name)
-                                .ok_or_else(|| Error::TableDoesntExist(table_name.to_string()))?;
+                            if !contexts.iter().any(|c| c.tables.get(table_name).is_some()) {
+                                return Err(Error::TableDoesntExist(table_name.clone()));
+                            }
 
-                            if !table.has_column(&column) {
+                            if !self.get_table(table_name).unwrap().has_column(&column) {
                                 return Err(Error::ColumnDoesntExist(column));
                             }
                         }
                         SelectColumn::AliasedWildcard(alias) => {
-                            let table_name = tables
+                            let table_name = contexts
                                 .iter()
-                                .find(|t| t.alias.as_ref().is_some_and(|a| a == &alias))
-                                .map(|t| &t.name)
+                                .find_map(|c| c.aliases.get(&alias))
                                 .ok_or(Error::AliasDoesntExist(alias))?;
 
-                            if self.get_table(table_name).is_none() {
+                            if !contexts.iter().any(|c| c.tables.get(table_name).is_some()) {
                                 return Err(Error::TableDoesntExist(table_name.clone()));
                             }
                         }
@@ -322,88 +245,15 @@ pub struct SelectTable {
     alias: Option<String>,
 }
 
-struct SelectInferrer<'a> {
-    tables: &'a [SelectTable],
-}
-
-impl<'a> ColumnInferrer for SelectInferrer<'a> {
-    fn infer_unqualified_type(
-        &self,
-        sim: &Simulator,
-        column: &str,
-    ) -> Result<Option<SqlType>, Error> {
-        let mut found_column: Option<Column> = None;
-
-        for table in self.tables {
-            if let Some(col) = sim
-                .get_table(&table.name)
-                .expect("The table must exist here")
-                .get_column(column)
-            {
-                match found_column {
-                    // Ensure that the unqualified column is unique.
-                    Some(_) => return Err(Error::AmbigiousColumn(column.to_string())),
-                    None => found_column = Some(col.clone()),
-                }
-            };
-        }
-
-        Ok(found_column.map(|c| c.ty))
-    }
-
-    fn infer_qualified_type(
-        &self,
-        sim: &Simulator,
-        qualifier: &str,
-        column: &str,
-    ) -> Result<SqlType, Error> {
-        match check_table_or_alias(self.tables, qualifier)? {
-            TableOrAlias::Table => {}
-            TableOrAlias::Alias => {}
-        }
-
-        match check_table_or_alias(self.tables, qualifier)? {
-            TableOrAlias::Table => {
-                let column = sim
-                    .get_table(qualifier)
-                    .unwrap()
-                    .get_column(column)
-                    .ok_or_else(|| Error::ColumnDoesntExist(column.to_string()))?;
-
-                Ok(column.ty.clone())
-            }
-            TableOrAlias::Alias => {
-                let table_name = &self
-                    .tables
-                    .iter()
-                    .find(|t| t.alias.as_ref().is_some_and(|a| a == qualifier))
-                    .ok_or_else(|| Error::AliasDoesntExist(qualifier.to_string()))?
-                    .name;
-
-                let column = sim
-                    .get_table(table_name)
-                    .unwrap()
-                    .get_column(column)
-                    .ok_or_else(|| Error::ColumnDoesntExist(column.to_string()))?;
-
-                Ok(column.ty.clone())
-            }
-        }
-    }
-}
-
 enum TableOrAlias {
     Table,
     Alias,
 }
 
-fn check_table_or_alias(tables: &[SelectTable], name: &str) -> Result<TableOrAlias, Error> {
-    if tables.iter().any(|t| t.name == name) {
+fn check_table_or_alias(ctx: &[JoinContext], name: &str) -> Result<TableOrAlias, Error> {
+    if ctx.iter().any(|c| c.tables.contains_key(name)) {
         Ok(TableOrAlias::Table)
-    } else if tables
-        .iter()
-        .any(|t| t.alias.as_ref().is_some_and(|a| a == name))
-    {
+    } else if ctx.iter().any(|c| c.aliases.contains_key(name)) {
         Ok(TableOrAlias::Alias)
     } else {
         Err(Error::TableOrAliasDoesntExist(name.to_string()))
@@ -464,7 +314,7 @@ mod tests {
 
         assert_eq!(
             sim.execute("select id from person, orders"),
-            Err(Error::AmbigiousColumn("id".to_string()))
+            Err(Error::AmbiguousColumn("id".to_string()))
         );
     }
 
@@ -478,7 +328,7 @@ mod tests {
 
         assert!(matches!(
             sim.execute("select * from person, orders"),
-            Err(Error::AmbigiousColumn(_))
+            Err(Error::AmbiguousColumn(_))
         ));
     }
 
@@ -715,7 +565,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             sim.execute("select person.name from person, company where id = 1"),
-            Err(Error::AmbigiousColumn("id".to_string()))
+            Err(Error::AmbiguousColumn("id".to_string()))
         );
     }
 
@@ -1000,7 +850,7 @@ mod tests {
 
         assert_eq!(
             sim.execute("select name from person natural join order"),
-            Err(Error::AmbigiousColumn("name".to_string()))
+            Err(Error::AmbiguousColumn("name".to_string()))
         );
     }
 

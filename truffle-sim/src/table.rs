@@ -1,11 +1,11 @@
 use std::collections::{HashMap, HashSet, hash_map::Entry};
 
-use indexmap::IndexMap;
+use indexmap::{IndexMap, map::IndexedEntry};
 use sqlparser::ast::ReferentialAction;
 
 use crate::column::Column;
 
-#[derive(Debug, Hash, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Hash, PartialEq, Eq, Default)]
 pub enum OnAction {
     #[default]
     Nothing,
@@ -27,7 +27,7 @@ impl From<ReferentialAction> for OnAction {
     }
 }
 
-#[derive(Debug, Hash, PartialEq, Eq)]
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub enum Constraint {
     ForeignKey {
         foreign_table: String,
@@ -46,7 +46,7 @@ impl Constraint {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct Table {
     pub columns: IndexMap<String, Column>,
     pub constraints: HashMap<String, HashSet<Constraint>>,
@@ -63,6 +63,12 @@ impl Table {
 
     pub fn get_column(&self, name: &str) -> Option<&Column> {
         self.columns.get(name)
+    }
+
+    pub fn get_column_entry(&mut self, name: &str) -> Option<IndexedEntry<'_, String, Column>> {
+        self.columns
+            .get_index_of(name)
+            .and_then(|idx| self.columns.get_index_entry(idx))
     }
 
     pub fn get_column_by_index(&self, index: usize) -> Option<(&str, &Column)> {

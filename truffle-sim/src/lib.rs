@@ -28,8 +28,8 @@ pub enum Error {
     TableDoesntExist(String),
     #[error("Column '{0}' doesn't exist")]
     ColumnDoesntExist(String),
-    #[error("Ambigious Column: {0}")]
-    AmbigiousColumn(String),
+    #[error("Ambiguous Column: {0}")]
+    AmbiguousColumn(String),
     #[error("Alias '{0}' doesn't exist")]
     AliasDoesntExist(String),
     #[error("Table or Alias '{0}' doesn't exist")]
