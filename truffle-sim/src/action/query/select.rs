@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use sqlparser::ast::{Expr, Select, SelectItem, SelectItemQualifiedWildcardKind, TableFactor};
 
@@ -132,13 +132,13 @@ impl Simulator {
 
                 for context in &contexts {
                     for (table, columns) in context.tables.iter() {
-                        for col in columns {
-                            if let Some(existing_table) = all_columns.get(col) {
+                        for column in columns {
+                            if let Some(existing_table) = all_columns.get(column) {
                                 if existing_table != table {
-                                    return Err(Error::AmbiguousColumn(col.to_string()));
+                                    return Err(Error::AmbiguousColumn(column.to_string()));
                                 }
                             } else {
-                                all_columns.insert(col.to_string(), table.to_string());
+                                all_columns.insert(column.to_string(), table.to_string());
                             }
                         }
                     }
@@ -238,11 +238,6 @@ pub enum SelectColumn {
     AbsoluteWildcard(String),
     /// This is a wildcard that uses a table alias.
     AliasedWildcard(String),
-}
-
-pub struct SelectTable {
-    name: String,
-    alias: Option<String>,
 }
 
 enum TableOrAlias {
@@ -835,6 +830,62 @@ mod tests {
                 expected: SqlType::Boolean,
                 got: SqlType::Integer
             })
+        );
+    }
+
+    #[test]
+    fn select_join_chain_basic() {
+        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        sim.execute("create table users (id int primary key, name text)")
+            .unwrap();
+        sim.execute("create table orders (id int primary key, user_id int, product_id int)")
+            .unwrap();
+        sim.execute("create table products (id int primary key, name text, price float)")
+            .unwrap();
+
+        sim.execute(
+            "select users.name, o.id, products.name 
+             from users 
+             join orders o on users.id = orders.user_id 
+             join products on orders.product_id = products.id",
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn select_join_chain_ambiguous() {
+        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        sim.execute("create table users (id int primary key, name text)")
+            .unwrap();
+        sim.execute("create table orders (id int primary key, user_id int)")
+            .unwrap();
+        sim.execute("create table products (id int primary key, name text)")
+            .unwrap();
+
+        assert_eq!(
+            sim.execute(
+                "select id from users 
+                 join orders on users.id = orders.user_id 
+                 join products on orders.id = products.id"
+            ),
+            Err(Error::AmbiguousColumn("id".to_string()))
+        );
+    }
+
+    #[test]
+    fn select_join_chain_table_doesnt_exist() {
+        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        sim.execute("create table users (id int primary key, name text)")
+            .unwrap();
+        sim.execute("create table orders (id int primary key, user_id int)")
+            .unwrap();
+
+        assert_eq!(
+            sim.execute(
+                "select id from users 
+                 join orders on users.id = products.id"
+            ),
+            Err(Error::TableOrAliasDoesntExist("products".to_string()))
         );
     }
 
