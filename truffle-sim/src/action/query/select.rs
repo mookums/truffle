@@ -153,10 +153,9 @@ impl Simulator {
                             }
                         }
                         SelectColumn::Absolute { table, column } => {
-                            if !self
-                                .get_table(&table)
-                                .expect("The table must exist")
-                                .has_column(&column)
+                            if !contexts
+                                .iter()
+                                .any(|c| c.has_column_in_table(&table, &column))
                             {
                                 return Err(Error::ColumnDoesntExist(column));
                             }
@@ -167,11 +166,11 @@ impl Simulator {
                                 .find_map(|c| c.aliases.get(&alias))
                                 .ok_or(Error::AliasDoesntExist(alias))?;
 
-                            if !contexts.iter().any(|c| c.tables.get(table_name).is_some()) {
+                            if !contexts.iter().any(|c| c.has_table(table_name)) {
                                 return Err(Error::TableDoesntExist(table_name.clone()));
                             }
 
-                            if !self.get_table(table_name).unwrap().has_column(&column) {
+                            if !contexts.iter().any(|c| c.has_column(&column)) {
                                 return Err(Error::ColumnDoesntExist(column));
                             }
                         }
@@ -181,12 +180,12 @@ impl Simulator {
                                 .find_map(|c| c.aliases.get(&alias))
                                 .ok_or(Error::AliasDoesntExist(alias))?;
 
-                            if !contexts.iter().any(|c| c.tables.get(table_name).is_some()) {
+                            if !contexts.iter().any(|c| c.has_table(table_name)) {
                                 return Err(Error::TableDoesntExist(table_name.clone()));
                             }
                         }
                         SelectColumn::AbsoluteWildcard(table) => {
-                            if self.get_table(&table).is_none() {
+                            if !contexts.iter().any(|c| c.tables.get(&table).is_some()) {
                                 return Err(Error::TableDoesntExist(table));
                             }
                         }
