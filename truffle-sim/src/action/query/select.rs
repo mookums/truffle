@@ -1,5 +1,6 @@
-use std::collections::HashMap;
+use std::collections::HashSet;
 
+use itertools::Itertools;
 use sqlparser::ast::{Expr, Select, SelectItem, SelectItemQualifiedWildcardKind, TableFactor};
 
 use crate::{
@@ -128,18 +129,16 @@ impl Simulator {
 
         match columns {
             SelectColumns::Wildcard => {
-                let mut all_columns: HashMap<String, String> = HashMap::new();
+                let mut all_columns = HashSet::new();
 
                 for context in &contexts {
-                    for (table, columns) in context.tables.iter() {
-                        for column in columns {
-                            if let Some(existing_table) = all_columns.get(column) {
-                                if existing_table != table {
-                                    return Err(Error::AmbiguousColumn(column.to_string()));
-                                }
-                            } else {
-                                all_columns.insert(column.to_string(), table.to_string());
-                            }
+                    for (col_ref, _) in context.refs.iter().unique_by(|r| *r.1) {
+                        let column = &col_ref.name;
+
+                        if all_columns.contains(column) {
+                            return Err(Error::AmbiguousColumn(column.to_string()));
+                        } else {
+                            all_columns.insert(column.to_string());
                         }
                     }
                 }
@@ -185,7 +184,10 @@ impl Simulator {
                             }
                         }
                         SelectColumn::AbsoluteWildcard(table) => {
-                            if !contexts.iter().any(|c| c.tables.get(&table).is_some()) {
+                            if !contexts
+                                .iter()
+                                .any(|c| c.refs.iter().any(|(r, _)| r.qualifier == table))
+                            {
                                 return Err(Error::TableDoesntExist(table));
                             }
                         }
@@ -245,7 +247,10 @@ enum TableOrAlias {
 }
 
 fn check_table_or_alias(ctx: &[JoinContext], name: &str) -> Result<TableOrAlias, Error> {
-    if ctx.iter().any(|c| c.tables.contains_key(name)) {
+    if ctx
+        .iter()
+        .any(|c| c.refs.iter().any(|(r, _)| r.qualifier == name))
+    {
         Ok(TableOrAlias::Table)
     } else if ctx.iter().any(|c| c.aliases.contains_key(name)) {
         Ok(TableOrAlias::Alias)
@@ -320,10 +325,10 @@ mod tests {
         sim.execute("create table orders (id int, total int)")
             .unwrap();
 
-        assert!(matches!(
+        assert_eq!(
             sim.execute("select * from person, orders"),
-            Err(Error::AmbiguousColumn(_))
-        ));
+            Err(Error::AmbiguousColumn("id".to_string()))
+        );
     }
 
     #[test]
@@ -927,7 +932,7 @@ mod tests {
     }
 
     #[test]
-    fn select_join_ambigious_column() {
+    fn select_join_ambiguous_column() {
         let mut sim = Simulator::new(Box::new(GenericDialect {}));
         sim.execute("create table person (id int primary key, name text)")
             .unwrap();
@@ -937,7 +942,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(
-            sim.execute("select name from person natural join order"),
+            sim.execute("select name from person join order on person.id = person_id"),
             Err(Error::AmbiguousColumn("name".to_string()))
         );
     }
@@ -970,5 +975,132 @@ mod tests {
             sim.execute("select order.* from person natural join order"),
             Err(Error::NoCommonColumn)
         );
+    }
+
+    #[test]
+    fn select_join_natural_single_common_column() {
+        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        sim.execute("create table person (id int primary key, name text)")
+            .unwrap();
+        sim.execute("create table order (id int primary key, total float)")
+            .unwrap();
+
+        sim.execute("select * from person natural join order")
+            .unwrap();
+    }
+
+    #[test]
+    fn select_join_natural_multiple_common_columns() {
+        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        sim.execute("create table person (id int primary key, dept_id int, name text)")
+            .unwrap();
+        sim.execute("create table employee (id int, dept_id int, salary float)")
+            .unwrap();
+
+        sim.execute("select * from person natural join employee")
+            .unwrap();
+    }
+
+    #[test]
+    fn select_join_natural_common_column_not_ambiguous() {
+        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        sim.execute("create table person (id int primary key, name text)")
+            .unwrap();
+        sim.execute("create table order (id int primary key, total float)")
+            .unwrap();
+
+        sim.execute("select id from person natural join order")
+            .unwrap();
+    }
+
+    #[test]
+    fn select_join_natural_qualified_common_column() {
+        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        sim.execute("create table person (id int primary key, name text)")
+            .unwrap();
+        sim.execute("create table order (id int primary key, total float)")
+            .unwrap();
+
+        sim.execute("select person.id from person natural join order")
+            .unwrap();
+
+        // TODO: you should be able to reference it this way too.
+        sim.execute("select order.id from person natural join order")
+            .unwrap();
+    }
+
+    #[test]
+    fn select_join_natural_type_mismatch() {
+        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        sim.execute("create table person (id int primary key, name text)")
+            .unwrap();
+        sim.execute("create table order (id text primary key, total float)")
+            .unwrap();
+
+        assert_eq!(
+            sim.execute("select * from person natural join order"),
+            Err(Error::TypeMismatch {
+                expected: SqlType::Integer,
+                got: SqlType::Text
+            })
+        );
+    }
+
+    #[test]
+    fn select_join_natural_mixed_common_and_unique() {
+        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        sim.execute("create table users (user_id int, dept_id int, name text)")
+            .unwrap();
+        sim.execute("create table departments (dept_id int, manager_id int, dept_name text)")
+            .unwrap();
+
+        sim.execute("select * from users natural join departments")
+            .unwrap();
+
+        sim.execute("select user_id, dept_name from users natural join departments")
+            .unwrap();
+
+        sim.execute("select dept_id from users natural join departments")
+            .unwrap();
+    }
+
+    #[test]
+    fn select_join_natural_chain() {
+        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        sim.execute("create table a (id int, x int)").unwrap();
+        sim.execute("create table b (id int, y int)").unwrap();
+        sim.execute("create table c (id int, z int)").unwrap();
+
+        sim.execute("select * from a natural join b natural join c")
+            .unwrap();
+
+        sim.execute("select id, x, y, z from a natural join b natural join c")
+            .unwrap();
+    }
+
+    #[test]
+    fn select_join_natural_chain_non_existing_column() {
+        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        sim.execute("create table a (id int, x int)").unwrap();
+        sim.execute("create table b (id int, y int)").unwrap();
+        sim.execute("create table c (id int, z int)").unwrap();
+
+        assert_eq!(
+            sim.execute("select id, x, y, z, v from a natural join b natural join c"),
+            Err(Error::ColumnDoesntExist("v".to_string()))
+        )
+    }
+
+    #[test]
+    fn select_join_natural_chain_non_existing_table() {
+        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        sim.execute("create table a (id int, x int)").unwrap();
+        sim.execute("create table b (id int, y int)").unwrap();
+        sim.execute("create table c (id int, z int)").unwrap();
+
+        assert_eq!(
+            sim.execute("select id, x, y, z, v.id from a natural join b natural join c"),
+            Err(Error::TableOrAliasDoesntExist("v".to_string()))
+        )
     }
 }
