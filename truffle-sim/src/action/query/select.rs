@@ -1258,7 +1258,7 @@ mod tests {
         sim.execute("create table empty2 (value text)").unwrap();
 
         // None join of empty tables should work (return no rows)
-        sim.execute("select * from empty1 crossjoin empty2")
+        sim.execute("select * from empty1 cross join empty2")
             .unwrap();
     }
 

@@ -76,10 +76,20 @@ impl Simulator {
                             right_table_alias,
                             JoinKind::Cross,
                         )?,
-                        _ => todo!(),
+                        _ => {
+                            return Err(Error::Unsupported(format!(
+                                "Unsupported Join Operator: {:?}",
+                                join.join_operator
+                            )));
+                        }
                     }
                 }
-                _ => todo!("Unsupported Join TableFactor: {}", join.relation),
+                _ => {
+                    return Err(Error::Unsupported(format!(
+                        "Unsupported Join TableFactor: {}",
+                        join.relation
+                    )));
+                }
             }
         }
 
@@ -403,6 +413,20 @@ impl JoinContext {
         sim: &Simulator,
         column: &str,
     ) -> Result<Option<SqlType>, Error> {
+        fn unwrap_match(sim: &Simulator, matches: &[(ColumnRef, usize)]) -> Result<SqlType, Error> {
+            let m = matches.first().unwrap();
+            let col_ref = &m.0;
+            let ty = sim
+                .get_table(&col_ref.qualifier)
+                .unwrap()
+                .get_column(&col_ref.name)
+                .unwrap()
+                .ty
+                .clone();
+
+            Ok(ty)
+        }
+
         let matches: Vec<(ColumnRef, usize)> = self
             .refs
             .clone()
@@ -412,20 +436,7 @@ impl JoinContext {
 
         match matches.len() {
             0 => Ok(None),
-            1 => {
-                // TODO: dedupe this.
-                let m = matches.first().unwrap();
-                let col_ref = &m.0;
-                let ty = sim
-                    .get_table(&col_ref.qualifier)
-                    .unwrap()
-                    .get_column(&col_ref.name)
-                    .unwrap()
-                    .ty
-                    .clone();
-
-                Ok(Some(ty))
-            }
+            1 => unwrap_match(sim, &matches).map(Some),
             _ => {
                 let same_logical = matches.iter().map(|m| m.1).all_equal();
 
@@ -433,17 +444,7 @@ impl JoinContext {
                 if !same_logical {
                     Err(Error::AmbiguousColumn(column.to_string()))
                 } else {
-                    let m = matches.first().unwrap();
-                    let col_ref = &m.0;
-                    let ty = sim
-                        .get_table(&col_ref.qualifier)
-                        .unwrap()
-                        .get_column(&col_ref.name)
-                        .unwrap()
-                        .ty
-                        .clone();
-
-                    Ok(Some(ty))
+                    unwrap_match(sim, &matches).map(Some)
                 }
             }
         }
