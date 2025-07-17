@@ -1,5 +1,6 @@
 use std::fmt::Display;
 
+use itertools::Itertools;
 use serde::Serialize;
 use sqlparser::ast::DataType;
 
@@ -7,6 +8,8 @@ use sqlparser::ast::DataType;
 pub enum SqlType {
     // NULL
     Null,
+    // Tuple of Types
+    Tuple(Vec<SqlType>),
     /// 16 bit Signed Integer
     SmallInt,
     /// 32 bit Signed Integer
@@ -48,7 +51,14 @@ impl SqlType {
 
 impl Display for SqlType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{self:#?}")
+        match self {
+            SqlType::Tuple(sql_types) => write!(
+                f,
+                "Tuple({})",
+                sql_types.iter().map(|ty| ty.to_string()).join(", ")
+            ),
+            _ => write!(f, "{self:#?}"),
+        }
     }
 }
 
@@ -62,7 +72,7 @@ impl From<DataType> for SqlType {
                 SqlType::Float
             }
             DataType::Double(_) | DataType::Float8 => SqlType::Double,
-            DataType::Text => SqlType::Text,
+            DataType::Text | DataType::String(_) => SqlType::Text,
             DataType::Bool | DataType::Boolean => SqlType::Boolean,
             DataType::Date => SqlType::Date,
             DataType::Timestamp(_, _) | DataType::Datetime(_) => SqlType::TimestampTz,

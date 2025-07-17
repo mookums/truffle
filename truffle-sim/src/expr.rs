@@ -106,12 +106,28 @@ impl Simulator {
                     _ => todo!(),
                 }
             }
+            Expr::Tuple(exprs) => {
+                if let Some(SqlType::Tuple(tys)) = expected {
+                    let inner_tuple_tys: Result<Vec<SqlType>, Error> = exprs
+                        .iter()
+                        .zip(tys)
+                        .map(|(e, ty)| self.infer_expr_type(e, Some(ty), inferrer))
+                        .collect();
+
+                    Ok(SqlType::Tuple(inner_tuple_tys?))
+                } else {
+                    Ok(SqlType::Tuple(
+                        exprs
+                            .iter()
+                            .map(|e| self.infer_expr_type(e, None, inferrer).unwrap())
+                            .collect(),
+                    ))
+                }
+            }
             Expr::Subquery(_) => {
                 todo!()
             }
-            _ => Err(Error::Unsupported(format!(
-                "Unsupported WHERE expr: {expr:#?}"
-            ))),
+            _ => Err(Error::Unsupported(format!("Unsupported Expr: {expr:#?}"))),
         }
     }
 

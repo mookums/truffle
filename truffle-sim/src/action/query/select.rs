@@ -532,6 +532,15 @@ mod tests {
     }
 
     #[test]
+    fn select_where_tuple_comparison() {
+        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        sim.execute("create table person (id int, name text, age int)")
+            .unwrap();
+        sim.execute("select name from person where (id, name) = (1, 'abc')")
+            .unwrap();
+    }
+
+    #[test]
     fn select_where_logical_operators() {
         let mut sim = Simulator::new(Box::new(GenericDialect {}));
         sim.execute("create table person (id int, name text, age int)")
@@ -638,6 +647,20 @@ mod tests {
             Err(Error::TypeMismatch {
                 expected: SqlType::Integer,
                 got: SqlType::Boolean
+            })
+        );
+    }
+
+    #[test]
+    fn select_where_invalid_tuple() {
+        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        sim.execute("create table person (id int, name text)")
+            .unwrap();
+        assert_eq!(
+            sim.execute("select name from person p where (p.id, p.name) = (false, 200)"),
+            Err(Error::TypeMismatch {
+                expected: SqlType::Tuple(vec![SqlType::Integer, SqlType::Text]),
+                got: SqlType::Tuple(vec![SqlType::Boolean, SqlType::SmallInt])
             })
         );
     }
