@@ -36,135 +36,46 @@ impl Simulator {
 
                     match &join.join_operator {
                         JoinOperator::Join(join_constraint)
-                        | JoinOperator::Inner(join_constraint) => match join_constraint {
-                            JoinConstraint::On(expr) => {
-                                let inferrer = JoinContextInferrer {
-                                    join_ctx: &join_ctx,
-                                    right_table: (&right_table_name, right_table),
-                                };
-
-                                let ty =
-                                    self.infer_expr_type(expr, Some(SqlType::Boolean), &inferrer)?;
-
-                                if ty != SqlType::Boolean {
-                                    return Err(Error::TypeMismatch {
-                                        expected: SqlType::Boolean,
-                                        got: ty,
-                                    });
-                                }
-
-                                join_ctx.join_table(
-                                    right_table,
-                                    &right_table_name,
-                                    right_table_alias,
-                                    JoinKind::On,
-                                )?;
-                            }
-                            JoinConstraint::Using(names) => {
-                                let column_names: Vec<String> = names
-                                    .iter()
-                                    .map(|n| object_name_to_strings(n).first().unwrap().clone())
-                                    .collect();
-
-                                for column_name in column_names.iter() {
-                                    let left_ty = if let Some((col_ref, _)) = join_ctx
-                                        .refs
-                                        .iter()
-                                        .unique_by(|(_, idx)| *idx)
-                                        .filter(|(r, _)| &r.name == column_name)
-                                        .at_most_one()
-                                        .map_err(|_| {
-                                            Error::AmbiguousColumn(column_name.to_string())
-                                        })? {
-                                        let table_name = &col_ref.qualifier;
-                                        let column = self
-                                            .get_table(table_name)
-                                            .unwrap()
-                                            .get_column(column_name)
-                                            .unwrap();
-
-                                        Some(column.ty.clone())
-                                    } else {
-                                        None
-                                    };
-
-                                    let right_ty =
-                                        right_table.get_column(column_name).map(|rc| rc.ty.clone());
-
-                                    match (left_ty, right_ty) {
-                                        (Some(lty), Some(rty)) => {
-                                            if lty == rty {
-                                                continue;
-                                            } else {
-                                                return Err(Error::TypeMismatch {
-                                                    expected: lty,
-                                                    got: rty,
-                                                });
-                                            }
-                                        }
-                                        _ => {
-                                            return Err(Error::ColumnDoesntExist(
-                                                column_name.to_string(),
-                                            ));
-                                        }
-                                    }
-                                }
-
-                                join_ctx.join_table(
-                                    right_table,
-                                    &right_table_name,
-                                    right_table_alias,
-                                    JoinKind::Using(column_names),
-                                )?;
-                            }
-                            JoinConstraint::Natural => {
-                                let mut found_common_column = false;
-
-                                // Check all columns from left tables against right table
-                                for (col_ref, _) in join_ctx.refs.iter().unique_by(|r| *r.1) {
-                                    let table_name = &col_ref.qualifier;
-                                    let column_name = &col_ref.name;
-
-                                    if let Some(right_column) = right_table.get_column(column_name)
-                                    {
-                                        let column = self
-                                            .get_table(table_name)
-                                            .unwrap()
-                                            .get_column(column_name)
-                                            .unwrap();
-
-                                        // Check if types match
-                                        if column.ty == right_column.ty {
-                                            found_common_column = true;
-                                        } else {
-                                            return Err(Error::TypeMismatch {
-                                                expected: column.ty.clone(),
-                                                got: right_column.ty.clone(),
-                                            });
-                                        }
-                                    }
-                                }
-
-                                if !found_common_column {
-                                    return Err(Error::NoCommonColumn);
-                                }
-
-                                join_ctx.join_table(
-                                    right_table,
-                                    &right_table_name,
-                                    right_table_alias,
-                                    JoinKind::Natural,
-                                )?;
-                            }
-                            JoinConstraint::None => {
-                                join_ctx.join_table(
-                                    right_table,
-                                    &right_table_name,
-                                    right_table_alias,
-                                    JoinKind::On,
-                                )?;
-                            }
-                        },
+                        | JoinOperator::Inner(join_constraint) => self.handle_join_constraint(
+                            join_constraint,
+                            &mut join_ctx,
+                            right_table,
+                            &right_table_name,
+                            right_table_alias.as_ref(),
+                        )?,
+                        // TODO: Pass join info down.
+                        JoinOperator::Left(join_constraint)
+                        | JoinOperator::LeftOuter(join_constraint) => self.handle_join_constraint(
+                            join_constraint,
+                            &mut join_ctx,
+                            right_table,
+                            &right_table_name,
+                            right_table_alias.as_ref(),
+                        )?,
+                        // TODO: Pass join info down.
+                        JoinOperator::Right(join_constraint)
+                        | JoinOperator::RightOuter(join_constraint) => self
+                            .handle_join_constraint(
+                                join_constraint,
+                                &mut join_ctx,
+                                right_table,
+                                &right_table_name,
+                                right_table_alias.as_ref(),
+                            )?,
+                        // TODO: Pass join info down.
+                        JoinOperator::FullOuter(join_constraint) => self.handle_join_constraint(
+                            join_constraint,
+                            &mut join_ctx,
+                            right_table,
+                            &right_table_name,
+                            right_table_alias.as_ref(),
+                        )?,
+                        JoinOperator::CrossJoin => join_ctx.join_table(
+                            right_table,
+                            right_table_name,
+                            right_table_alias,
+                            JoinKind::Cross,
+                        )?,
                         _ => todo!(),
                     }
                 }
@@ -173,6 +84,141 @@ impl Simulator {
         }
 
         Ok(join_ctx)
+    }
+
+    fn handle_join_constraint(
+        &self,
+        join_constraint: &JoinConstraint,
+        join_ctx: &mut JoinContext,
+        right_table: &Table,
+        right_table_name: &str,
+        right_table_alias: Option<&String>,
+    ) -> Result<(), Error> {
+        match join_constraint {
+            JoinConstraint::On(expr) => {
+                let inferrer = JoinContextInferrer {
+                    join_ctx,
+                    right_table: (right_table_name, right_table),
+                };
+
+                let ty = self.infer_expr_type(expr, Some(SqlType::Boolean), &inferrer)?;
+
+                if ty != SqlType::Boolean {
+                    return Err(Error::TypeMismatch {
+                        expected: SqlType::Boolean,
+                        got: ty,
+                    });
+                }
+
+                join_ctx.join_table(
+                    right_table,
+                    right_table_name,
+                    right_table_alias,
+                    JoinKind::Cross,
+                )?;
+            }
+            JoinConstraint::Using(names) => {
+                let column_names: Vec<String> = names
+                    .iter()
+                    .map(|n| object_name_to_strings(n).first().unwrap().clone())
+                    .collect();
+
+                for column_name in column_names.iter() {
+                    let left_ty = if let Some((col_ref, _)) = join_ctx
+                        .refs
+                        .iter()
+                        .unique_by(|(_, idx)| *idx)
+                        .filter(|(r, _)| &r.name == column_name)
+                        .at_most_one()
+                        .map_err(|_| Error::AmbiguousColumn(column_name.to_string()))?
+                    {
+                        let table_name = &col_ref.qualifier;
+                        let column = self
+                            .get_table(table_name)
+                            .unwrap()
+                            .get_column(column_name)
+                            .unwrap();
+
+                        Some(column.ty.clone())
+                    } else {
+                        None
+                    };
+
+                    let right_ty = right_table.get_column(column_name).map(|rc| rc.ty.clone());
+
+                    match (left_ty, right_ty) {
+                        (Some(lty), Some(rty)) => {
+                            if lty == rty {
+                                continue;
+                            } else {
+                                return Err(Error::TypeMismatch {
+                                    expected: lty,
+                                    got: rty,
+                                });
+                            }
+                        }
+                        _ => {
+                            return Err(Error::ColumnDoesntExist(column_name.to_string()));
+                        }
+                    }
+                }
+
+                join_ctx.join_table(
+                    right_table,
+                    right_table_name,
+                    right_table_alias,
+                    JoinKind::Using(column_names),
+                )?;
+            }
+            JoinConstraint::Natural => {
+                let mut found_common_column = false;
+
+                // Check all columns from left tables against right table
+                for (col_ref, _) in join_ctx.refs.iter().unique_by(|r| *r.1) {
+                    let table_name = &col_ref.qualifier;
+                    let column_name = &col_ref.name;
+
+                    if let Some(right_column) = right_table.get_column(column_name) {
+                        let column = self
+                            .get_table(table_name)
+                            .unwrap()
+                            .get_column(column_name)
+                            .unwrap();
+
+                        // Check if types match
+                        if column.ty == right_column.ty {
+                            found_common_column = true;
+                        } else {
+                            return Err(Error::TypeMismatch {
+                                expected: column.ty.clone(),
+                                got: right_column.ty.clone(),
+                            });
+                        }
+                    }
+                }
+
+                if !found_common_column {
+                    return Err(Error::NoCommonColumn);
+                }
+
+                join_ctx.join_table(
+                    right_table,
+                    right_table_name,
+                    right_table_alias,
+                    JoinKind::Natural,
+                )?;
+            }
+            JoinConstraint::None => {
+                join_ctx.join_table(
+                    right_table,
+                    right_table_name,
+                    right_table_alias,
+                    JoinKind::Cross,
+                )?;
+            }
+        };
+
+        Ok(())
     }
 }
 
@@ -199,7 +245,7 @@ pub struct JoinContext {
 }
 
 enum JoinKind {
-    On,
+    Cross,
     Natural,
     Using(Vec<String>),
 }
@@ -249,7 +295,7 @@ impl JoinContext {
         let table_name = name.to_string();
 
         match kind {
-            JoinKind::On => {
+            JoinKind::Cross => {
                 // add all columns from the right to the left
                 for (column_name, column) in columns.iter() {
                     let index = self.columns.len();

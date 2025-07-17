@@ -1252,6 +1252,17 @@ mod tests {
     }
 
     #[test]
+    fn select_cross_join() {
+        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        sim.execute("create table empty1 (id int)").unwrap();
+        sim.execute("create table empty2 (value text)").unwrap();
+
+        // None join of empty tables should work (return no rows)
+        sim.execute("select * from empty1 crossjoin empty2")
+            .unwrap();
+    }
+
+    #[test]
     fn select_join_using() {
         let mut sim = Simulator::new(Box::new(GenericDialect {}));
         sim.execute("create table table1 (id int primary key, fruit text not null)")
@@ -1327,5 +1338,122 @@ mod tests {
 
         sim.execute("select id, fruit, price, juice from table1 join table2 using (id, fruit)")
             .unwrap();
+    }
+
+    #[test]
+    fn select_left_join_basic() {
+        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        sim.execute("create table person (id int primary key, name text)")
+            .unwrap();
+        sim.execute(
+            "create table order (id int primary key, person_id int references person(id), total float)",
+        )
+        .unwrap();
+
+        sim.execute("select person.*, order.total from person left join order on person.id = order.person_id")
+            .unwrap()
+    }
+
+    #[test]
+    fn select_left_outer_join_basic() {
+        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        sim.execute("create table users (id int primary key, name text)")
+            .unwrap();
+        sim.execute("create table orders (id int primary key, user_id int, total float)")
+            .unwrap();
+
+        sim.execute("select users.name, orders.total from users left outer join orders on users.id = orders.user_id")
+            .unwrap()
+    }
+
+    #[test]
+    fn select_left_join_using() {
+        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        sim.execute("create table table1 (id int primary key, name text)")
+            .unwrap();
+        sim.execute("create table table2 (id int primary key, value int)")
+            .unwrap();
+
+        sim.execute("select id, name, value from table1 left join table2 using (id)")
+            .unwrap();
+    }
+
+    #[test]
+    fn select_right_join_basic() {
+        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        sim.execute("create table person (id int primary key, name text)")
+            .unwrap();
+        sim.execute(
+            "create table order (id int primary key, person_id int references person(id), total float)",
+        )
+        .unwrap();
+
+        sim.execute("select person.name, order.* from person right join order on person.id = order.person_id")
+            .unwrap()
+    }
+
+    #[test]
+    fn select_right_outer_join_basic() {
+        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        sim.execute("create table employees (id int primary key, name text)")
+            .unwrap();
+        sim.execute("create table departments (id int primary key, emp_id int, dept_name text)")
+            .unwrap();
+
+        sim.execute("select employees.name, departments.dept_name from employees right outer join departments on employees.id = departments.emp_id")
+            .unwrap()
+    }
+
+    #[test]
+    fn select_right_join_natural() {
+        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        sim.execute("create table products (id int primary key, name text)")
+            .unwrap();
+        sim.execute("create table inventory (id int primary key, quantity int)")
+            .unwrap();
+
+        sim.execute("select * from products natural right join inventory")
+            .unwrap();
+    }
+
+    #[test]
+    fn select_full_outer_join_basic() {
+        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        sim.execute("create table customers (id int primary key, name text)")
+            .unwrap();
+        sim.execute("create table orders (id int primary key, customer_id int, amount float)")
+            .unwrap();
+
+        sim.execute("select customers.name, orders.amount from customers full outer join orders on customers.id = orders.customer_id")
+            .unwrap()
+    }
+
+    #[test]
+    fn select_full_outer_join_using() {
+        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        sim.execute("create table left_table (shared_id int, left_data text)")
+            .unwrap();
+        sim.execute("create table right_table (shared_id int, right_data text)")
+            .unwrap();
+
+        sim.execute("select shared_id, left_data, right_data from left_table full outer join right_table using (shared_id)")
+            .unwrap();
+    }
+
+    #[test]
+    fn select_outer_join_type_mismatch() {
+        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        sim.execute("create table table1 (id int primary key, name text)")
+            .unwrap();
+        sim.execute("create table table2 (id int primary key, value text)")
+            .unwrap();
+
+        assert_eq!(
+            sim.execute("select * from table1 left outer join table2 on table1.id = table2.value"),
+            Err(Error::TypeMismatch {
+                expected: SqlType::Integer,
+                got: SqlType::Text
+            })
+        );
     }
 }
