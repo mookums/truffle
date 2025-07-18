@@ -2,31 +2,6 @@ use sqlparser::ast::{Insert, SetExpr, TableObject};
 
 use crate::{Error, Simulator, expr::ColumnInferrer, object_name_to_strings};
 
-struct InsertInferrer {}
-
-impl ColumnInferrer for InsertInferrer {
-    fn infer_unqualified_type(
-        &self,
-        _: &Simulator,
-        _: &str,
-    ) -> Result<Option<crate::ty::SqlType>, Error> {
-        Err(Error::Unsupported(
-            "Can't infer values in INSERT".to_string(),
-        ))
-    }
-
-    fn infer_qualified_type(
-        &self,
-        _: &Simulator,
-        _: &str,
-        _: &str,
-    ) -> Result<crate::ty::SqlType, Error> {
-        Err(Error::Unsupported(
-            "Can't infer values in INSERT".to_string(),
-        ))
-    }
-}
-
 impl Simulator {
     pub(crate) fn insert(&self, ins: Insert) -> Result<(), Error> {
         let TableObject::TableName(table_object_name) = ins.table else {
@@ -112,6 +87,31 @@ impl Simulator {
         }
 
         Ok(())
+    }
+}
+
+struct InsertInferrer {}
+
+impl ColumnInferrer for InsertInferrer {
+    fn infer_unqualified_type(
+        &self,
+        _: &Simulator,
+        _: &str,
+    ) -> Result<Option<crate::ty::SqlType>, Error> {
+        Err(Error::Unsupported(
+            "Can't infer values in INSERT".to_string(),
+        ))
+    }
+
+    fn infer_qualified_type(
+        &self,
+        _: &Simulator,
+        _: &str,
+        _: &str,
+    ) -> Result<crate::ty::SqlType, Error> {
+        Err(Error::Unsupported(
+            "Can't infer values in INSERT".to_string(),
+        ))
     }
 }
 
