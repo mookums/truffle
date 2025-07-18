@@ -16,8 +16,8 @@ impl Simulator {
                     return Err(Error::TableDoesntExist(name.to_string()));
                 }
 
-                for (_, constraints) in self.tables.iter().map(|t| t.1).flat_map(|t| &t.constraints)
-                {
+                // Ensure that this table isn't a constraint on another table.
+                for (_, constraints) in self.tables.iter().flat_map(|t| &t.1.constraints) {
                     for constraint in constraints {
                         if let Constraint::ForeignKey { foreign_table, .. } = constraint {
                             if foreign_table == &name {
