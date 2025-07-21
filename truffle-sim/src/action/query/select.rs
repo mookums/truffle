@@ -1,12 +1,15 @@
 use std::collections::HashSet;
 
-use sqlparser::ast::{
-    BinaryOperator, CastKind, Expr, Select, SelectItem, SelectItemQualifiedWildcardKind,
-    TableFactor, UnaryOperator, Value,
-};
+use sqlparser::ast::{Expr, Select, SelectItem, SelectItemQualifiedWildcardKind, TableFactor};
 use tracing::warn;
 
-use crate::{Error, Simulator, column::Column, object_name_to_strings, ty::SqlType};
+use crate::{
+    Error, Simulator,
+    column::Column,
+    expr::{ColumnInferrer, infer_expr_type},
+    object_name_to_strings,
+    ty::SqlType,
+};
 
 pub enum SelectColumns {
     /// Selects all columns across the FROM clause.
@@ -43,377 +46,92 @@ pub struct SelectTable {
     alias: Option<String>,
 }
 
+struct SelectInferrer<'a> {
+    tables: &'a [SelectTable],
+}
+
+impl<'a> ColumnInferrer for SelectInferrer<'a> {
+    fn infer_unqualified_type(
+        &self,
+        sim: &mut Simulator,
+        column: &str,
+    ) -> Result<Option<SqlType>, Error> {
+        let mut found_column: Option<Column> = None;
+
+        for table in self.tables {
+            if let Some(col) = sim
+                .get_table(&table.name)
+                .expect("The table must exist here")
+                .get_column(column)
+            {
+                match found_column {
+                    // Ensure that the unqualified column is unique.
+                    Some(_) => return Err(Error::AmbigiousColumn(column.to_string())),
+                    None => found_column = Some(col.clone()),
+                }
+            };
+        }
+
+        Ok(found_column.map(|c| c.ty))
+    }
+
+    fn infer_qualified_type(
+        &self,
+        sim: &mut Simulator,
+        qualifier: &str,
+        column: &str,
+    ) -> Result<SqlType, Error> {
+        match check_table_or_alias(self.tables, qualifier)? {
+            TableOrAlias::Table => {}
+            TableOrAlias::Alias => {}
+        }
+
+        match check_table_or_alias(self.tables, qualifier)? {
+            TableOrAlias::Table => {
+                let column = sim
+                    .get_table(qualifier)
+                    .unwrap()
+                    .get_column(column)
+                    .ok_or_else(|| Error::ColumnDoesntExist(column.to_string()))?;
+
+                Ok(column.ty.clone())
+            }
+            TableOrAlias::Alias => {
+                let table_name = &self
+                    .tables
+                    .iter()
+                    .find(|t| t.alias.as_ref().is_some_and(|a| a == qualifier))
+                    .ok_or(Error::AliasDoesntExist(qualifier.to_string()))?
+                    .name;
+
+                let column = sim
+                    .get_table(table_name)
+                    .unwrap()
+                    .get_column(column)
+                    .ok_or_else(|| Error::ColumnDoesntExist(column.to_string()))?;
+
+                Ok(column.ty.clone())
+            }
+        }
+    }
+}
+
 enum TableOrAlias {
     Table,
     Alias,
 }
 
-/// Checks if a value is table or an alias.
-/// Returns Error:TableOrAliasDoesntExist if it is neither.
-///
-/// If the identifier matches a table in the FROM clause,
-/// we treat this as an absolute column.
-///
-/// If the identifier matches an alias in the FROM clause,
-/// we treat this as an aliased column.
-///
-/// Otherwise, this TableOrAliasDoesntExist gets returned.
-fn check_table_or_alias(
-    table_or_alias: &str,
-    tables: &[SelectTable],
-) -> Result<TableOrAlias, Error> {
-    if tables.iter().any(|t| t.name == table_or_alias) {
+fn check_table_or_alias(tables: &[SelectTable], name: &str) -> Result<TableOrAlias, Error> {
+    if tables.iter().any(|t| t.name == name) {
         Ok(TableOrAlias::Table)
     } else if tables
         .iter()
-        .any(|t| t.alias.as_ref().is_some_and(|a| a == table_or_alias))
+        .any(|t| t.alias.as_ref().is_some_and(|a| a == name))
     {
         Ok(TableOrAlias::Alias)
     } else {
-        Err(Error::TableOrAliasDoesntExist(table_or_alias.to_string()))
+        Err(Error::TableOrAliasDoesntExist(name.to_string()))
     }
-}
-
-fn infer_expr_type(
-    expr: &Expr,
-    sim: &mut Simulator,
-    tables: &Vec<SelectTable>,
-    expected: Option<SqlType>,
-) -> Result<SqlType, Error> {
-    match expr {
-        Expr::Value(val) => match val.value.clone() {
-            Value::Number(str, _) => {
-                // Initially, try to use the expected type.
-                if let Some(expected_ty) = expected {
-                    match expected_ty {
-                        SqlType::SmallInt => {
-                            if str.parse::<i16>().is_ok() {
-                                return Ok(SqlType::SmallInt);
-                            }
-                        }
-                        SqlType::Integer => {
-                            if str.parse::<i32>().is_ok() {
-                                return Ok(SqlType::Integer);
-                            }
-                        }
-                        SqlType::BigInt => {
-                            if str.parse::<i64>().is_ok() {
-                                return Ok(SqlType::BigInt);
-                            }
-                        }
-                        SqlType::Float => {
-                            if str.parse::<f32>().is_ok() {
-                                return Ok(SqlType::Float);
-                            }
-                        }
-                        SqlType::Double => {
-                            if str.parse::<f64>().is_ok() {
-                                return Ok(SqlType::Float);
-                            }
-                        }
-                        _ => {}
-                    }
-                }
-
-                // Fallback to smallest type to biggest.
-                if str.parse::<i16>().is_ok() {
-                    Ok(SqlType::SmallInt)
-                } else if str.parse::<i32>().is_ok() {
-                    Ok(SqlType::Integer)
-                } else if str.parse::<i64>().is_ok() {
-                    Ok(SqlType::BigInt)
-                } else if str.contains('.') || str.to_lowercase().contains('e') {
-                    if str.parse::<f32>().is_ok() {
-                        Ok(SqlType::Float)
-                    } else if str.parse::<f64>().is_ok() {
-                        Ok(SqlType::Double)
-                    } else {
-                        Err(Error::Sql("Invalid floating point number".to_string()))
-                    }
-                } else {
-                    // Integer that's too large for i64
-                    Err(Error::Sql("Number is too big".to_string()))
-                }
-            }
-            Value::SingleQuotedString(_)
-            | Value::DollarQuotedString(_)
-            | Value::SingleQuotedByteStringLiteral(_)
-            | Value::DoubleQuotedByteStringLiteral(_)
-            | Value::NationalStringLiteral(_)
-            | Value::HexStringLiteral(_)
-            | Value::DoubleQuotedString(_) => Ok(SqlType::Text),
-            Value::Boolean(_) => Ok(SqlType::Boolean),
-            Value::Null => Ok(SqlType::Null),
-            // Placeholder just takes the type of the expected.
-            Value::Placeholder(_) => expected.ok_or(Error::Unsupported(
-                "Cannot infer type of the placeholder".to_string(),
-            )),
-            _ => todo!(),
-        },
-        Expr::IsTrue(expr)
-        | Expr::IsNotTrue(expr)
-        | Expr::IsFalse(expr)
-        | Expr::IsNotFalse(expr)
-        | Expr::IsUnknown(expr)
-        | Expr::IsNotUnknown(expr) => {
-            let ty = infer_expr_type(expr, sim, tables, Some(SqlType::Boolean))?;
-            if ty != SqlType::Boolean {
-                return Err(Error::TypeMismatch {
-                    expected: SqlType::Boolean,
-                    got: ty,
-                });
-            }
-
-            Ok(SqlType::Boolean)
-        }
-
-        Expr::IsNull(expr) | Expr::IsNotNull(expr) => {
-            _ = infer_expr_type(expr, sim, tables, expected)?;
-            Ok(SqlType::Boolean)
-        }
-        Expr::Identifier(ident) => {
-            let name = &ident.value;
-
-            let column = get_unqualified_column(sim, tables, name)?
-                .ok_or(Error::ColumnDoesntExist(name.to_string()))?;
-
-            Ok(column.ty)
-        }
-        Expr::CompoundIdentifier(idents) => {
-            // validate that identifier is a column.
-            let table_or_alias = &idents.first().unwrap().value;
-            let column_name = &idents.get(1).unwrap().value;
-
-            match check_table_or_alias(table_or_alias, tables)? {
-                TableOrAlias::Table => {
-                    let column = sim
-                        .get_table(table_or_alias)
-                        .unwrap()
-                        .get_column(column_name)
-                        .ok_or_else(|| Error::ColumnDoesntExist(column_name.to_string()))?;
-
-                    Ok(column.ty.clone())
-                }
-                TableOrAlias::Alias => {
-                    let table_name = &tables
-                        .iter()
-                        .find(|t| t.alias.as_ref().is_some_and(|a| a == table_or_alias))
-                        .ok_or(Error::AliasDoesntExist(table_or_alias.to_string()))?
-                        .name;
-
-                    let column = sim
-                        .get_table(table_name)
-                        .unwrap()
-                        .get_column(column_name)
-                        .ok_or_else(|| Error::ColumnDoesntExist(column_name.to_string()))?;
-
-                    Ok(column.ty.clone())
-                }
-            }
-        }
-        Expr::BinaryOp { left, right, op } => {
-            let left_ty = infer_expr_type(left, sim, tables, expected)?;
-            let right_ty = infer_expr_type(right, sim, tables, Some(left_ty.clone()))?;
-
-            match op {
-                BinaryOperator::Plus
-                | BinaryOperator::Minus
-                | BinaryOperator::Multiply
-                | BinaryOperator::Divide
-                | BinaryOperator::Modulo => {
-                    if left_ty != right_ty {
-                        return Err(Error::TypeMismatch {
-                            expected: left_ty,
-                            got: right_ty,
-                        });
-                    }
-
-                    Ok(left_ty)
-                }
-                BinaryOperator::Gt
-                | BinaryOperator::Lt
-                | BinaryOperator::GtEq
-                | BinaryOperator::LtEq => {
-                    if left_ty != right_ty {
-                        return Err(Error::TypeMismatch {
-                            expected: left_ty,
-                            got: right_ty,
-                        });
-                    }
-
-                    Ok(SqlType::Boolean)
-                }
-
-                BinaryOperator::StringConcat => todo!(),
-                BinaryOperator::Spaceship => todo!(),
-                BinaryOperator::Eq | BinaryOperator::NotEq => {
-                    if left_ty != right_ty {
-                        return Err(Error::TypeMismatch {
-                            expected: left_ty,
-                            got: right_ty,
-                        });
-                    }
-
-                    Ok(SqlType::Boolean)
-                }
-                BinaryOperator::And | BinaryOperator::Or | BinaryOperator::Xor => {
-                    if left_ty != SqlType::Boolean {
-                        return Err(Error::TypeMismatch {
-                            expected: SqlType::Boolean,
-                            got: left_ty,
-                        });
-                    }
-                    if right_ty != SqlType::Boolean {
-                        return Err(Error::TypeMismatch {
-                            expected: SqlType::Boolean,
-                            got: right_ty,
-                        });
-                    }
-
-                    Ok(SqlType::Boolean)
-                }
-                BinaryOperator::BitwiseOr
-                | BinaryOperator::BitwiseAnd
-                | BinaryOperator::BitwiseXor => {
-                    if !matches!(
-                        left_ty,
-                        SqlType::SmallInt | SqlType::Integer | SqlType::BigInt
-                    ) {
-                        return Err(Error::TypeMismatch {
-                            expected: SqlType::Integer,
-                            got: left_ty,
-                        });
-                    }
-
-                    if left_ty != right_ty {
-                        return Err(Error::TypeMismatch {
-                            expected: left_ty,
-                            got: right_ty,
-                        });
-                    }
-
-                    Ok(left_ty)
-                }
-                _ => {
-                    todo!()
-                }
-            }
-        }
-        Expr::UnaryOp { expr, op } => {
-            let ty = infer_expr_type(expr, sim, tables, expected)?;
-
-            match op {
-                UnaryOperator::Plus | UnaryOperator::Minus => {
-                    if !ty.is_numeric() {
-                        Err(Error::TypeNotNumeric(ty))
-                    } else {
-                        Ok(ty)
-                    }
-                }
-                UnaryOperator::Not => {
-                    if ty != SqlType::Boolean {
-                        Err(Error::TypeMismatch {
-                            expected: SqlType::Boolean,
-                            got: ty,
-                        })
-                    } else {
-                        Ok(SqlType::Boolean)
-                    }
-                }
-                _ => todo!(),
-            }
-        }
-        Expr::Nested(expr) => infer_expr_type(expr, sim, tables, expected),
-        Expr::InList { expr, list, .. } => {
-            let ty = infer_expr_type(expr, sim, tables, expected)?;
-            for item in list {
-                let item_ty = infer_expr_type(item, sim, tables, Some(ty.clone()))?;
-                if ty != item_ty {
-                    return Err(Error::TypeMismatch {
-                        expected: ty,
-                        got: item_ty,
-                    });
-                }
-            }
-
-            Ok(SqlType::Boolean)
-        }
-        Expr::Cast {
-            kind,
-            expr,
-            data_type,
-            ..
-        } => {
-            let ty: SqlType = data_type.clone().into();
-            match kind {
-                CastKind::Cast | CastKind::DoubleColon => {
-                    let _inner_ty = infer_expr_type(expr, sim, tables, Some(ty.clone()))?;
-                    // TODO: Ensure the two types are castable.
-
-                    Ok(ty)
-                }
-                _ => todo!(),
-            }
-        }
-        _ => Err(Error::Unsupported(format!(
-            "Unsupported WHERE expr: {expr:#?}"
-        ))),
-    }
-}
-
-/// This checks through all of the tables to:
-/// 1. Ensure that a column with the name 'column' exists.
-/// 2. That it is unique with no other columns with the same name.
-///
-/// If 1 fails, we return false.
-/// If 2 fails, we return an Error::AmbigiousColumn.
-/// Else, we return true.
-fn has_unqualified_column(
-    sim: &Simulator,
-    tables: &[SelectTable],
-    column: &str,
-) -> Result<bool, Error> {
-    let mut column_found = false;
-
-    for table in tables {
-        let found = sim
-            .get_table(&table.name)
-            .expect("The table must exist here.")
-            .has_column(column);
-
-        // Ensure that the unqualified column is unique.
-        if column_found && found {
-            return Err(Error::AmbigiousColumn(column.to_string()));
-        } else if found {
-            column_found = true;
-        }
-    }
-
-    Ok(column_found)
-}
-
-fn get_unqualified_column(
-    sim: &Simulator,
-    tables: &[SelectTable],
-    column: &str,
-) -> Result<Option<Column>, Error> {
-    let mut found_column: Option<Column> = None;
-
-    for table in tables {
-        if let Some(col) = sim
-            .get_table(&table.name)
-            .expect("The table must exist here")
-            .get_column(column)
-        {
-            match found_column {
-                // Ensure that the unqualified column is unique.
-                Some(_) => return Err(Error::AmbigiousColumn(column.to_string())),
-                None => found_column = Some(col.clone()),
-            }
-        };
-    }
-
-    Ok(found_column)
 }
 
 pub fn handle_select_query(sim: &mut Simulator, select: &Select) -> Result<(), Error> {
@@ -451,6 +169,8 @@ pub fn handle_select_query(sim: &mut Simulator, select: &Select) -> Result<(), E
         }
     }
 
+    let inferrer = SelectInferrer { tables: &tables };
+
     for projection in &select.projection {
         match projection {
             SelectItem::UnnamedExpr(expr) => match expr {
@@ -465,7 +185,7 @@ pub fn handle_select_query(sim: &mut Simulator, select: &Select) -> Result<(), E
                     let table_or_alias = &idents.first().unwrap().value;
                     let column_name = &idents.get(1).unwrap().value;
 
-                    match check_table_or_alias(table_or_alias, &tables)? {
+                    match check_table_or_alias(&tables, table_or_alias)? {
                         TableOrAlias::Table => {
                             columns.expect_list_mut().push(SelectColumn::Absolute {
                                 table: table_or_alias.to_string(),
@@ -495,7 +215,7 @@ pub fn handle_select_query(sim: &mut Simulator, select: &Select) -> Result<(), E
                 SelectItemQualifiedWildcardKind::ObjectName(name) => {
                     let table_or_alias = object_name_to_strings(name).first().unwrap().clone();
 
-                    match check_table_or_alias(&table_or_alias, &tables)? {
+                    match check_table_or_alias(&tables, &table_or_alias)? {
                         TableOrAlias::Table => {
                             columns
                                 .expect_list_mut()
@@ -537,7 +257,7 @@ pub fn handle_select_query(sim: &mut Simulator, select: &Select) -> Result<(), E
             for column in list.into_iter() {
                 match column {
                     SelectColumn::Unqualified(column) => {
-                        if !has_unqualified_column(sim, &tables, &column)? {
+                        if inferrer.infer_unqualified_type(sim, &column)?.is_none() {
                             return Err(Error::ColumnDoesntExist(column));
                         }
                     }
@@ -588,7 +308,7 @@ pub fn handle_select_query(sim: &mut Simulator, select: &Select) -> Result<(), E
 
     // Validate WHERE clause.
     if let Some(selection) = &select.selection {
-        infer_expr_type(selection, sim, &tables, Some(SqlType::Boolean))?;
+        infer_expr_type(selection, sim, Some(SqlType::Boolean), &inferrer)?;
     }
 
     Ok(())

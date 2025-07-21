@@ -1,5 +1,6 @@
 mod action;
 mod column;
+mod expr;
 mod table;
 mod ty;
 
