@@ -1,12 +1,4 @@
-use serde::Serialize;
-
 use crate::ty::SqlType;
-
-#[derive(Debug, Serialize)]
-pub struct ColumnForeignKey {
-    pub foreign_table: String,
-    pub foreign_columns: Vec<String>,
-}
 
 #[derive(Debug, Clone)]
 pub struct Column {
