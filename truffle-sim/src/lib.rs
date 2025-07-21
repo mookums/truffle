@@ -1,14 +1,15 @@
 mod action;
 mod column;
 mod table;
+mod ty;
 
 use action::{create_table::handle_create_table, drop::handle_drop, query::handle_query};
-use column::ColumnType;
 pub use sqlparser::dialect::*;
 use sqlparser::{
     ast::{ObjectName, Statement},
     parser::Parser,
 };
+use ty::SqlType;
 
 use std::collections::HashMap;
 use table::Table;
@@ -38,10 +39,9 @@ pub enum Error {
     #[error("Foreign Key Constraint Failure on Column '{0}'")]
     ForeignKeyConstraint(String),
     #[error("Type Mismatch: expected {expected} and got {got}")]
-    TypeMismatch {
-        expected: ColumnType,
-        got: ColumnType,
-    },
+    TypeMismatch { expected: SqlType, got: SqlType },
+    #[error("Type Not Numeric: got {0}")]
+    TypeNotNumeric(SqlType),
     #[error("Cannot set not null column '{0}' to null")]
     NullOnNotNullColumn(String),
     #[error("Cannot set not default column '{0}' to default value")]
