@@ -1,10 +1,11 @@
 use std::collections::HashMap;
 
-use indexmap::{IndexMap, map::Entry};
+use itertools::Itertools;
 use sqlparser::ast::{Join, JoinConstraint, JoinOperator, TableFactor};
 
 use crate::{
-    Error, Simulator, expr::ColumnInferrer, object_name_to_strings, table::Table, ty::SqlType,
+    Error, Simulator, column::Column, expr::ColumnInferrer, object_name_to_strings, table::Table,
+    ty::SqlType,
 };
 
 impl Simulator {
@@ -52,52 +53,52 @@ impl Simulator {
                                     });
                                 }
 
-                                join_ctx.append_table(
+                                join_ctx.join_table(
                                     right_table,
                                     &right_table_name,
                                     right_table_alias,
+                                    JoinKind::On,
                                 )?;
                             }
-                            // JoinConstraint::Using(object_names) => {
-                            //     for object_name in object_names {
-                            //         let column_name = object_name_to_strings(object_name)
-                            //             .first()
-                            //             .unwrap()
-                            //             .clone();
+                            JoinConstraint::Natural => {
+                                let mut found_common_column = false;
 
-                            //         if inferrer
-                            //             .infer_unqualified_type(self, &column_name)?
-                            //             .is_none()
-                            //         {
-                            //             return Err(Error::ColumnDoesntExist(column_name));
-                            //         }
-                            //     }
+                                // Check all columns from left tables against right table
+                                for (col_ref, _) in join_ctx.refs.iter() {
+                                    let table_name = &col_ref.qualifier;
+                                    let column_name = &col_ref.name;
 
-                            //     // add using columns from left and all from right.
-                            // }
-                            // JoinConstraint::Natural => {
-                            //     let found_common_column = false;
-                            //     // for (column_name, column) in &join_table.columns {
-                            //     //     if let Some(right_column) = right_table.get_column(column_name)
-                            //     //     {
-                            //     //         if column.ty == right_column.ty {
-                            //     //             found_common_column = true;
-                            //     //             break;
-                            //     //         } else {
-                            //     //             return Err(Error::TypeMismatch {
-                            //     //                 expected: column.ty.clone(),
-                            //     //                 got: right_column.ty.clone(),
-                            //     //             });
-                            //     //         }
-                            //     //     }
-                            //     // }
+                                    if let Some(right_column) = right_table.get_column(column_name)
+                                    {
+                                        let column = self
+                                            .get_table(table_name)
+                                            .unwrap()
+                                            .get_column(column_name)
+                                            .unwrap();
 
-                            //     if !found_common_column {
-                            //         return Err(Error::NoCommonColumn);
-                            //     }
+                                        // Check if types match
+                                        if column.ty == right_column.ty {
+                                            found_common_column = true;
+                                        } else {
+                                            return Err(Error::TypeMismatch {
+                                                expected: column.ty.clone(),
+                                                got: right_column.ty.clone(),
+                                            });
+                                        }
+                                    }
+                                }
 
-                            //     // add common columns once and all non common from right
-                            // }
+                                if !found_common_column {
+                                    return Err(Error::NoCommonColumn);
+                                }
+
+                                join_ctx.join_table(
+                                    right_table,
+                                    &right_table_name,
+                                    right_table_alias,
+                                    JoinKind::Natural,
+                                )?;
+                            }
                             // JoinConstraint::None => {}
                             _ => todo!(),
                         },
@@ -112,44 +113,129 @@ impl Simulator {
     }
 }
 
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
+pub struct ColumnRef {
+    pub qualifier: String,
+    pub name: String,
+}
+
+impl ColumnRef {
+    pub fn new(qualifier: impl ToString, name: impl ToString) -> ColumnRef {
+        ColumnRef {
+            qualifier: qualifier.to_string(),
+            name: name.to_string(),
+        }
+    }
+}
+
 pub struct JoinContext {
     // Maps the alias to the table name
     pub aliases: HashMap<String, String>,
-    // Maps the table name to the list of columns in this join table.
-    pub tables: IndexMap<String, Vec<String>>,
+    pub refs: HashMap<ColumnRef, usize>,
+    pub columns: Vec<Column>,
+}
+
+enum JoinKind {
+    On,
+    Natural,
 }
 
 impl JoinContext {
-    pub fn from_table(
+    fn from_table(
         table: &Table,
         name: impl ToString,
         alias: Option<impl ToString>,
     ) -> Result<JoinContext, Error> {
-        let mut tables = IndexMap::new();
         let mut aliases = HashMap::new();
 
-        let columns: Vec<String> = table.columns.iter().map(|c| c.0.clone()).collect();
-        tables.insert(name.to_string(), columns);
+        let table_columns = table.columns.clone();
+        let mut refs = HashMap::new();
+        let mut columns = Vec::new();
+
+        let table_name = name.to_string();
+
+        for (i, (column_name, column)) in table_columns.iter().enumerate() {
+            assert!(
+                refs.insert(ColumnRef::new(&table_name, column_name), i)
+                    .is_none()
+            );
+
+            // if let Some(alias) = aliases.get(&table_name) {
+            //     assert!(
+            //         refs.insert(ColumnRef::qualified(alias, column_name), i)
+            //             .is_none()
+            //     );
+            // }
+
+            columns.push(column.clone());
+        }
 
         if let Some(alias) = alias {
             aliases.insert(alias.to_string(), name.to_string());
         }
 
-        Ok(JoinContext { tables, aliases })
+        Ok(JoinContext {
+            refs,
+            aliases,
+            columns,
+        })
     }
 
-    pub fn append_table(
+    fn join_table(
         &mut self,
         table: &Table,
         name: impl ToString,
         alias: Option<impl ToString>,
+        kind: JoinKind,
     ) -> Result<(), Error> {
-        let mut columns: Vec<String> = table.columns.iter().map(|c| c.0.clone()).collect();
+        let columns = table.columns.clone();
         let table_name = name.to_string();
-        match self.tables.entry(table_name) {
-            Entry::Occupied(mut entry) => entry.get_mut().append(&mut columns),
-            Entry::Vacant(entry) => _ = entry.insert(columns),
-        };
+
+        match kind {
+            JoinKind::On => {
+                // add all columns from the right to the left
+                for (column_name, column) in columns.iter() {
+                    let index = self.columns.len();
+                    self.columns.push(column.clone());
+
+                    assert!(
+                        self.refs
+                            .insert(ColumnRef::new(&table_name, column_name), index)
+                            .is_none()
+                    );
+                }
+            }
+            JoinKind::Natural => {
+                let all_existing_columns: Vec<String> =
+                    self.refs.keys().map(|r| r.name.clone()).collect();
+
+                for (column_name, column) in columns.iter() {
+                    if all_existing_columns.contains(column_name) {
+                        let existing_index = self
+                            .refs
+                            .iter()
+                            .find(|(r, _)| r.name == *column_name)
+                            .map(|(_, idx)| *idx)
+                            .unwrap();
+
+                        assert!(
+                            self.refs
+                                .insert(ColumnRef::new(&table_name, column_name), existing_index)
+                                .is_none()
+                        );
+                    } else {
+                        let index = self.columns.len();
+                        self.columns.push(column.clone());
+
+                        assert!(
+                            self.refs
+                                .insert(ColumnRef::new(&table_name, column_name), index)
+                                .is_none()
+                        );
+                    }
+                }
+            }
+        }
 
         if let Some(alias) = alias {
             self.aliases.insert(alias.to_string(), name.to_string());
@@ -159,19 +245,17 @@ impl JoinContext {
     }
 
     pub fn has_table(&self, table: &str) -> bool {
-        self.tables.contains_key(table)
+        self.refs.keys().any(|k| k.qualifier == table)
     }
 
     pub fn has_column_in_table(&self, table: &str, column: &str) -> bool {
-        self.tables
+        self.refs
             .iter()
-            .any(|t| t.0 == table && t.1.contains(&column.to_string()))
+            .any(|(r, _)| r.qualifier == table && r.name == column)
     }
 
     pub fn has_column(&self, column: &str) -> bool {
-        self.tables
-            .iter()
-            .any(|t| t.1.contains(&column.to_string()))
+        self.refs.keys().map(|k| &k.name).any(|n| n == column)
     }
 
     fn infer_unqualified_type(
@@ -179,27 +263,50 @@ impl JoinContext {
         sim: &Simulator,
         column: &str,
     ) -> Result<Option<SqlType>, Error> {
-        let mut found_ty = None;
+        let matches: Vec<(ColumnRef, usize)> = self
+            .refs
+            .clone()
+            .into_iter()
+            .filter(|(r, _)| r.name == column)
+            .collect();
 
-        for (table_name, columns) in &self.tables {
-            if columns.contains(&column.to_string()) {
-                match found_ty {
-                    Some(_) => return Err(Error::AmbiguousColumn(column.to_string())),
-                    None => {
-                        found_ty = Some(
-                            sim.get_table(table_name)
-                                .unwrap()
-                                .get_column(column)
-                                .unwrap()
-                                .ty
-                                .clone(),
-                        )
-                    }
+        match matches.len() {
+            0 => Ok(None),
+            1 => {
+                // TODO: dedupe this.
+                let m = matches.first().unwrap();
+                let col_ref = &m.0;
+                let ty = sim
+                    .get_table(&col_ref.qualifier)
+                    .unwrap()
+                    .get_column(&col_ref.name)
+                    .unwrap()
+                    .ty
+                    .clone();
+
+                Ok(Some(ty))
+            }
+            _ => {
+                let same_logical = matches.iter().map(|m| m.1).all_equal();
+
+                // It is only ambiguous if they map to different logical columns.
+                if !same_logical {
+                    Err(Error::AmbiguousColumn(column.to_string()))
+                } else {
+                    let m = matches.first().unwrap();
+                    let col_ref = &m.0;
+                    let ty = sim
+                        .get_table(&col_ref.qualifier)
+                        .unwrap()
+                        .get_column(&col_ref.name)
+                        .unwrap()
+                        .ty
+                        .clone();
+
+                    Ok(Some(ty))
                 }
             }
         }
-
-        Ok(found_ty)
     }
 
     fn infer_qualified_type(
@@ -209,9 +316,17 @@ impl JoinContext {
         column: &str,
         matched: &mut bool,
     ) -> Option<SqlType> {
-        if let Some(table) = self.tables.get(qualifier) {
+        // Check raw qualifier first.
+        let columns: Vec<String> = self
+            .refs
+            .iter()
+            .filter(|(r, _)| r.qualifier == qualifier)
+            .map(|(r, _)| r.name.clone())
+            .collect();
+
+        if !columns.is_empty() {
             *matched = true;
-            if table.contains(&column.to_string()) {
+            if columns.contains(&column.to_string()) {
                 return Some(
                     sim.get_table(qualifier)
                         .unwrap()
@@ -223,10 +338,10 @@ impl JoinContext {
             }
         }
 
+        // Check if it is an alias.
         if let Some(table_name) = self.aliases.get(qualifier) {
-            let table = self.tables.get(table_name).unwrap();
             *matched = true;
-            if table.contains(&column.to_string()) {
+            if self.refs.contains_key(&ColumnRef::new(table_name, column)) {
                 return Some(
                     sim.get_table(table_name)
                         .unwrap()
