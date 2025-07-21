@@ -68,6 +68,7 @@ impl Simulator {
     }
 }
 
+#[cfg(test)]
 mod tests {
     use crate::*;
 
@@ -100,5 +101,18 @@ mod tests {
             sim.execute("delete from person where weight = ?"),
             Err(Error::TableDoesntExist("person".to_string()))
         )
+    }
+
+    #[test]
+    fn delete_row_join() {
+        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        sim.execute("create table person (id int primary key, name text)")
+            .unwrap();
+        sim.execute(
+            "create table order (id int primary key, item text not null, address text not null)",
+        )
+        .unwrap();
+        sim.execute("delete from person natural join order where address = ?")
+            .unwrap();
     }
 }
