@@ -52,9 +52,7 @@ fn main() {
                             match pieces.next().unwrap() {
                                 ".help" => {
                                     println!("    .tables -> prints out of all of the tables");
-                                    println!(
-                                        "    .import <PATH> -> imports the file at path and executes it"
-                                    );
+                                    println!("    .import <PATH> -> executes file at the path");
                                     println!("    .exit -> exit (can also ctrl+c)");
                                 }
                                 ".tables" => {
