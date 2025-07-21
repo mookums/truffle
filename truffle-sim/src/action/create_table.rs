@@ -1,18 +1,10 @@
 use sqlparser::ast::CreateTable;
 use tracing::debug;
 
-use crate::{Error, Simulator, column::Column, table::Table};
+use crate::{Error, Simulator, column::Column, object_name_to_strings, table::Table};
 
 pub fn handle_create_table(sim: &mut Simulator, create_table: CreateTable) -> Result<(), Error> {
-    let name = create_table
-        .name
-        .0
-        .first()
-        .unwrap()
-        .as_ident()
-        .unwrap()
-        .value
-        .clone();
+    let name = object_name_to_strings(&create_table.name).pop().unwrap();
 
     // Ensure that this table doesn't already exist.
     if !create_table.if_not_exists && sim.tables.contains_key(&name) {
@@ -22,9 +14,7 @@ pub fn handle_create_table(sim: &mut Simulator, create_table: CreateTable) -> Re
     let mut table = Table::default();
     for column in create_table.columns {
         let col_name = column.name.value.clone();
-        let column = Column {
-            kind: column.data_type.into(),
-        };
+        let column = Column::new(column.data_type.into());
 
         // Ensure that this column doen't already exist.
         if table.columns.contains_key(&col_name) {
@@ -91,9 +81,18 @@ mod tests {
             .unwrap();
         assert_eq!(sim.tables.len(), 1);
         let table = sim.tables.get("person").unwrap();
-        assert_eq!(table.columns.get("id").unwrap().kind, ColumnKind::Uuid);
-        assert_eq!(table.columns.get("name").unwrap().kind, ColumnKind::Text);
-        assert_eq!(table.columns.get("weight").unwrap().kind, ColumnKind::Float);
+        assert_eq!(
+            table.columns.get("id").unwrap().get_kind(),
+            &ColumnKind::Uuid
+        );
+        assert_eq!(
+            table.columns.get("name").unwrap().get_kind(),
+            &ColumnKind::Text
+        );
+        assert_eq!(
+            table.columns.get("weight").unwrap().get_kind(),
+            &ColumnKind::Float
+        );
     }
 
     #[test]
