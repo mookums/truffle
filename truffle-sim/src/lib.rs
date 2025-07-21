@@ -3,6 +3,7 @@ mod column;
 mod table;
 
 use action::{create_table::handle_create_table, drop::handle_drop, query::handle_query};
+use column::ColumnType;
 pub use sqlparser::dialect::*;
 use sqlparser::{
     ast::{ObjectName, Statement},
@@ -34,6 +35,13 @@ pub enum Error {
     TableOrAliasDoesntExist(String),
     #[error("Alias '{0}' is the name of an existing Table")]
     AliasIsTableName(String),
+    #[error("Foreign Key Constraint Failure on Column '{0}'")]
+    ForeignKeyConstraint(String),
+    #[error("Type Mismatch: expected {expected} and got {got}")]
+    TypeMismatch {
+        expected: ColumnType,
+        got: ColumnType,
+    },
     #[error("'{0}' is currently unsupported")]
     Unsupported(String),
 }
