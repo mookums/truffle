@@ -1,7 +1,7 @@
 use sqlparser::ast::{ObjectName, ObjectType};
 use tracing::{debug, warn};
 
-use crate::{Error, Simulator, object_name_to_strings};
+use crate::{Error, Simulator, object_name_to_strings, table::Constraint};
 
 impl Simulator {
     pub(crate) fn drop(
@@ -13,7 +13,18 @@ impl Simulator {
             for name in names.iter().flat_map(object_name_to_strings) {
                 // Ensure that the table being dropped exists.
                 if !self.tables.contains_key(&name) {
-                    return Err(Error::TableDoesntExist(name));
+                    return Err(Error::TableDoesntExist(name.to_string()));
+                }
+
+                for (_, constraints) in self.tables.iter().map(|t| t.1).flat_map(|t| &t.constraints)
+                {
+                    for constraint in constraints {
+                        if let Constraint::ForeignKey { foreign_table, .. } = constraint {
+                            if foreign_table == &name {
+                                return Err(Error::ForeignKeyConstraint(name.to_string()));
+                            }
+                        }
+                    }
                 }
 
                 debug!(name = %name, "Dropping Table");
@@ -48,5 +59,19 @@ mod tests {
             sim.execute("drop table person;"),
             Err(Error::TableDoesntExist("person".to_string()))
         );
+    }
+
+    #[test]
+    fn drop_table_foreign_key_constaint() {
+        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        sim.execute("create table person (id int primary key, name text)")
+            .unwrap();
+        sim.execute("create table order (id int primary key, person_id int references person(id))")
+            .unwrap();
+
+        assert_eq!(
+            sim.execute("drop table person"),
+            Err(Error::ForeignKeyConstraint("person".to_string()))
+        )
     }
 }

@@ -137,7 +137,7 @@ impl Simulator {
                     let left_ty = if let Some((col_ref, _)) = join_ctx
                         .refs
                         .iter()
-                        .unique_by(|(_, idx)| *idx)
+                        // .unique_by(|(_, idx)| *idx)
                         .filter(|(r, _)| &r.name == column_name)
                         .at_most_one()
                         .map_err(|_| Error::AmbiguousColumn(column_name.to_string()))?
@@ -151,7 +151,7 @@ impl Simulator {
 
                         Some(column.ty.clone())
                     } else {
-                        None
+                        return Err(Error::ColumnDoesntExist(column_name.to_string()));
                     };
 
                     let right_ty = right_table.get_column(column_name).map(|rc| rc.ty.clone());
