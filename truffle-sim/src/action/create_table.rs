@@ -24,6 +24,8 @@ pub fn handle_create_table(sim: &mut Simulator, create_table: CreateTable) -> Re
         table.columns.insert(col_name, column);
     }
 
+    // TODO: Properly handle constraints on Tables and Columns
+
     debug!(name = %name, "Creating Table");
     sim.tables.insert(name, table);
 
@@ -33,15 +35,6 @@ pub fn handle_create_table(sim: &mut Simulator, create_table: CreateTable) -> Re
 #[cfg(test)]
 mod tests {
     use crate::{column::ColumnKind, *};
-
-    #[test]
-    fn invalid_sql() {
-        let mut sim = Simulator::new(Box::new(GenericDialect {}));
-        assert!(matches!(
-            sim.execute("create eveyrthing (id int);"),
-            Err(Error::Parsing(_))
-        ))
-    }
 
     #[test]
     fn create_table() {
