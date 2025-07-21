@@ -1021,10 +1021,14 @@ mod tests {
         sim.execute("create table order (id int primary key, total float)")
             .unwrap();
 
+        // These all references the same logical column and so
+        // it is valid to select any of them!
+        sim.execute("select id from person natural join order")
+            .unwrap();
+
         sim.execute("select person.id from person natural join order")
             .unwrap();
 
-        // TODO: you should be able to reference it this way too.
         sim.execute("select order.id from person natural join order")
             .unwrap();
     }
@@ -1102,5 +1106,148 @@ mod tests {
             sim.execute("select id, x, y, z, v.id from a natural join b natural join c"),
             Err(Error::TableOrAliasDoesntExist("v".to_string()))
         )
+    }
+
+    #[test]
+    fn select_join_none_basic() {
+        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        sim.execute("create table colors (color_id int, name text)")
+            .unwrap();
+        sim.execute("create table sizes (size_id int, size_name text)")
+            .unwrap();
+
+        sim.execute("select * from colors join sizes").unwrap();
+    }
+
+    #[test]
+    fn select_join_none_with_ambiguous_wildcard() {
+        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        sim.execute("create table table1 (id int, name text)")
+            .unwrap();
+        sim.execute("create table table2 (id int, value text)")
+            .unwrap();
+
+        assert!(matches!(
+            sim.execute("select * from table1 join table2"),
+            Err(Error::AmbiguousColumn(_))
+        ));
+    }
+
+    #[test]
+    fn select_join_none_with_comma_syntax() {
+        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        sim.execute("create table a (x int)").unwrap();
+        sim.execute("create table b (y int)").unwrap();
+
+        sim.execute("select * from a, b").unwrap();
+    }
+
+    #[test]
+    fn select_join_none_specific_columns() {
+        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        sim.execute("create table products (product_id int, name text)")
+            .unwrap();
+        sim.execute("create table categories (category_id int, category text)")
+            .unwrap();
+
+        sim.execute("select products.name, categories.category from products join categories")
+            .unwrap();
+    }
+
+    #[test]
+    fn select_join_none_qualified_columns() {
+        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        sim.execute("create table person (id int, name text)")
+            .unwrap();
+        sim.execute("create table company (id int, company_name text)")
+            .unwrap();
+
+        sim.execute("select person.id, company.id from person join company")
+            .unwrap();
+    }
+
+    #[test]
+    fn select_join_none_ambiguous_column() {
+        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        sim.execute("create table left_table (id int, value text)")
+            .unwrap();
+        sim.execute("create table right_table (id int, score int)")
+            .unwrap();
+
+        assert_eq!(
+            sim.execute("select id from left_table join right_table"),
+            Err(Error::AmbiguousColumn("id".to_string()))
+        );
+    }
+
+    #[test]
+    fn select_join_none_with_aliases() {
+        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        sim.execute("create table users (user_id int, name text)")
+            .unwrap();
+        sim.execute("create table roles (role_id int, role_name text)")
+            .unwrap();
+
+        sim.execute("select u.name, r.role_name from users u join roles r")
+            .unwrap();
+    }
+
+    #[test]
+    fn select_join_none_with_where_clause() {
+        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        sim.execute("create table numbers (n int)").unwrap();
+        sim.execute("create table multipliers (m int)").unwrap();
+
+        sim.execute("select * from numbers join multipliers where numbers.n < multipliers.m")
+            .unwrap();
+    }
+
+    #[test]
+    fn select_join_none_multiple_tables() {
+        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        sim.execute("create table a (x int)").unwrap();
+        sim.execute("create table b (y int)").unwrap();
+        sim.execute("create table c (z int)").unwrap();
+
+        // TODO: This requires supporting TableFactor::NestedJoin.
+        // As it considers this to be a nested join.
+        sim.execute("select * from a join b join c").unwrap();
+    }
+
+    #[test]
+    fn select_join_none_empty_tables() {
+        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        sim.execute("create table empty1 (id int)").unwrap();
+        sim.execute("create table empty2 (value text)").unwrap();
+
+        // None join of empty tables should work (return no rows)
+        sim.execute("select * from empty1 join empty2").unwrap();
+    }
+
+    #[test]
+    fn select_join_none_wildcard_expansion() {
+        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        sim.execute("create table team (team_id int, team_name text)")
+            .unwrap();
+        sim.execute("create table player (player_id int, player_name text)")
+            .unwrap();
+
+        // SELECT * should include all columns from both tables
+        sim.execute("select * from team join player").unwrap();
+
+        // Qualified wildcards should work too
+        sim.execute("select team.*, player.player_name from team join player")
+            .unwrap();
+    }
+
+    #[test]
+    fn select_inner_join_vs_join_none() {
+        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        sim.execute("create table table1 (a int)").unwrap();
+        sim.execute("create table table2 (b int)").unwrap();
+
+        sim.execute("select * from table1 join table2").unwrap();
+        sim.execute("select * from table1 inner join table2")
+            .unwrap();
     }
 }

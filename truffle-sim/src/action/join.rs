@@ -99,13 +99,20 @@ impl Simulator {
                                     JoinKind::Natural,
                                 )?;
                             }
-                            // JoinConstraint::None => {}
+                            JoinConstraint::None => {
+                                join_ctx.join_table(
+                                    right_table,
+                                    &right_table_name,
+                                    right_table_alias,
+                                    JoinKind::On,
+                                )?;
+                            }
                             _ => todo!(),
                         },
                         _ => todo!(),
                     }
                 }
-                _ => return Err(Error::Unsupported("Unsupported JOIN relation".to_string())),
+                _ => todo!("Unsupported Join TableFactor: {}", join.relation),
             }
         }
 
@@ -214,8 +221,13 @@ impl JoinContext {
                         let existing_index = self
                             .refs
                             .iter()
-                            .find(|(r, _)| r.name == *column_name)
-                            .map(|(_, idx)| *idx)
+                            .find_map(|(r, idx)| {
+                                if r.name == *column_name {
+                                    Some(*idx)
+                                } else {
+                                    None
+                                }
+                            })
                             .unwrap();
 
                         assert!(
