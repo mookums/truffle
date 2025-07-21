@@ -30,22 +30,7 @@ pub enum ColumnType {
 
 impl Display for ColumnType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let str = match self {
-            ColumnType::SmallInt => "smallint",
-            ColumnType::Integer => "integer",
-            ColumnType::BigInt => "bigint",
-            ColumnType::Float => "float",
-            ColumnType::Double => "double",
-            ColumnType::Text => "text",
-            ColumnType::Boolean => "bool",
-            ColumnType::Date => "date",
-            ColumnType::Timestamp => "timestamp",
-            ColumnType::Uuid => "uuid",
-            ColumnType::Json => "json",
-            ColumnType::Unknown(_) => "unknown",
-        };
-
-        write!(f, "{str}")
+        write!(f, "{self:#?}")
     }
 }
 
