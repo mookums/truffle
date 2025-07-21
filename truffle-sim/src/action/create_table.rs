@@ -1,4 +1,4 @@
-use sqlparser::ast::{ColumnOption, CreateTable};
+use sqlparser::ast::{ColumnOption, CreateTable, TableConstraint};
 use tracing::debug;
 
 use crate::{
@@ -117,7 +117,7 @@ pub fn handle_create_table(sim: &mut Simulator, create_table: CreateTable) -> Re
     // Handle table level constraints.
     for constraint in create_table.constraints {
         match constraint {
-            sqlparser::ast::TableConstraint::ForeignKey {
+            TableConstraint::ForeignKey {
                 columns,
                 foreign_table,
                 referred_columns,
@@ -153,16 +153,19 @@ pub fn handle_create_table(sim: &mut Simulator, create_table: CreateTable) -> Re
                         .get_column(foreign_col_name)
                         .ok_or_else(|| Error::ColumnDoesntExist(foreign_col_name.to_string()))?;
 
-                    if !f_table.is_unique(&[foreign_col_name]) {
-                        return Err(Error::ForeignKeyConstraint(foreign_col_name.to_string()));
-                    }
-
                     if local_column.ty != foreign_column.ty {
                         return Err(Error::TypeMismatch {
                             expected: foreign_column.ty.clone(),
                             got: local_column.ty.clone(),
                         });
                     }
+                }
+
+                if !f_table.is_unique(&foreign_column_names) {
+                    return Err(Error::ForeignKeyConstraint(format!(
+                        "({})",
+                        foreign_column_names.join(", ")
+                    )));
                 }
 
                 table.insert_constraint(
