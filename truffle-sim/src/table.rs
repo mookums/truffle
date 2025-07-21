@@ -8,3 +8,9 @@ use crate::column::Column;
 pub struct Table {
     pub columns: HashMap<String, Column>,
 }
+
+impl Table {
+    pub fn has_column(&self, name: &str) -> bool {
+        self.columns.contains_key(name)
+    }
+}

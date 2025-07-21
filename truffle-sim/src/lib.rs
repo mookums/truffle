@@ -14,8 +14,10 @@ use table::Table;
 
 #[derive(Debug, PartialEq, Eq, thiserror::Error)]
 pub enum Error {
-    #[error("Parsing Error: {0}")]
+    #[error("Parsing: {0}")]
     Parsing(#[from] sqlparser::parser::ParserError),
+    #[error("SQL: {0}")]
+    Sql(String),
     #[error("Table '{0}' already exists")]
     TableAlreadyExists(String),
     #[error("Column '{0}' already exists")]
@@ -24,6 +26,14 @@ pub enum Error {
     TableDoesntExist(String),
     #[error("Column '{0}' doesn't exist")]
     ColumnDoesntExist(String),
+    #[error("Ambigious Column: {0}")]
+    AmbigiousColumn(String),
+    #[error("Alias '{0}' doesn't exist")]
+    AliasDoesntExist(String),
+    #[error("Table or Alias '{0}' doesn't exist")]
+    TableOrAliasDoesntExist(String),
+    #[error("Alias '{0}' is the name of an existing Table")]
+    AliasIsTableName(String),
     #[error("'{0}' is currently unsupported")]
     Unsupported(String),
 }
@@ -59,6 +69,10 @@ impl Simulator {
         &self.tables
     }
 
+    pub fn has_table(&self, name: &str) -> bool {
+        self.tables.contains_key(name)
+    }
+
     /// Executes the given SQL in the Simulator and updates the state.
     pub fn execute(&mut self, sql: &str) -> Result<(), Error> {
         let parser = Parser::new(&*self.dialect);
@@ -72,7 +86,7 @@ impl Simulator {
                 Statement::Drop {
                     object_type, names, ..
                 } => handle_drop(self, &object_type, names)?,
-                _ => todo!(),
+                _ => return Err(Error::Unsupported(statement.to_string())),
             }
         }
 
