@@ -158,6 +158,22 @@ impl JoinContext {
         Ok(())
     }
 
+    pub fn has_table(&self, table: &str) -> bool {
+        self.tables.contains_key(table)
+    }
+
+    pub fn has_column_in_table(&self, table: &str, column: &str) -> bool {
+        self.tables
+            .iter()
+            .any(|t| t.0 == table && t.1.contains(&column.to_string()))
+    }
+
+    pub fn has_column(&self, column: &str) -> bool {
+        self.tables
+            .iter()
+            .any(|t| t.1.contains(&column.to_string()))
+    }
+
     fn infer_unqualified_type(
         &self,
         sim: &Simulator,
