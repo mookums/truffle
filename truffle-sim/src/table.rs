@@ -53,7 +53,7 @@ pub struct Table {
 
 impl Table {
     pub fn create_compound_key(columns: &[String]) -> String {
-        columns.join(":").to_lowercase()
+        format!("({})", columns.join(", ").to_lowercase())
     }
 
     pub fn has_column(&self, name: &str) -> bool {

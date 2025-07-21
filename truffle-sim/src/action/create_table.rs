@@ -94,11 +94,11 @@ pub fn handle_create_table(sim: &mut Simulator, create_table: CreateTable) -> Re
                         }
 
                         if let Some(on_delete) = on_delete {
-                            validate_on_action(&on_delete, &name, nullable, default)?;
+                            validate_on_action(&on_delete, column_name, nullable, default)?;
                         }
 
                         if let Some(on_update) = on_update {
-                            validate_on_action(&on_update, &name, nullable, default)?;
+                            validate_on_action(&on_update, column_name, nullable, default)?;
                         }
 
                         foreign_columns.push(foreign_column_name.to_string());
@@ -139,6 +139,32 @@ pub fn handle_create_table(sim: &mut Simulator, create_table: CreateTable) -> Re
     // Handle table level constraints.
     for constraint in create_table.constraints {
         match constraint {
+            TableConstraint::Unique { columns, .. } => {
+                // TODO: Properly support unique constraint names
+                let column_names: Vec<String> =
+                    columns.iter().map(|c| c.value.to_string()).collect();
+
+                for column_name in column_names.iter() {
+                    if !table.has_column(column_name) {
+                        return Err(Error::ColumnDoesntExist(column_name.clone()));
+                    }
+                }
+
+                table.insert_constraint(&column_names, Constraint::Unique);
+            }
+            TableConstraint::PrimaryKey { columns, .. } => {
+                let column_names: Vec<String> =
+                    columns.iter().map(|c| c.value.to_string()).collect();
+
+                for column_name in column_names.iter() {
+                    if !table.has_column(column_name) {
+                        return Err(Error::ColumnDoesntExist(column_name.clone()));
+                    }
+                }
+
+                table.insert_constraint(&column_names, Constraint::Unique);
+                table.insert_constraint(&column_names, Constraint::PrimaryKey);
+            }
             TableConstraint::ForeignKey {
                 columns,
                 foreign_table,
@@ -221,9 +247,9 @@ pub fn handle_create_table(sim: &mut Simulator, create_table: CreateTable) -> Re
                 );
             }
             _ => {
-                // return Err(Error::Unsupported(format!(
-                //     "Unsupported table constraint on CREATE TABLE: {constraint:#?}"
-                // )));
+                return Err(Error::Unsupported(format!(
+                    "Unsupported table constraint on CREATE TABLE: {constraint:#?}"
+                )));
             }
         }
     }
@@ -534,7 +560,45 @@ mod tests {
     }
 
     #[test]
-    fn create_table_foreign_key_on_update_null_on_not_null() {
+    fn create_table_col_foreign_key_on_update_null_on_not_null() {
+        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        sim.execute("create table person (id uuid primary key, name text unique, phone int);")
+            .unwrap();
+
+        assert_eq!(
+            sim.execute(
+                r#"
+                create table order(
+                    order_id uuid primary key,
+                    person_id uuid not null references person(id) on update set null
+                );
+            "#,
+            ),
+            Err(Error::NullOnNotNullColumn("person_id".to_string()))
+        );
+    }
+
+    #[test]
+    fn create_table_col_foreign_key_on_update_default_on_not_default() {
+        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        sim.execute("create table person (id uuid primary key, name text unique, phone int);")
+            .unwrap();
+
+        assert_eq!(
+            sim.execute(
+                r#"
+                create table order(
+                    order_id uuid primary key,
+                    person_id uuid not null references person(id) on update set default
+                );
+            "#,
+            ),
+            Err(Error::DefaultOnNotDefaultColumn("person_id".to_string()))
+        );
+    }
+
+    #[test]
+    fn create_table_table_foreign_key_on_update_null_on_not_null() {
         let mut sim = Simulator::new(Box::new(GenericDialect {}));
         sim.execute("create table person (id uuid primary key, name text unique, phone int);")
             .unwrap();
@@ -554,7 +618,7 @@ mod tests {
     }
 
     #[test]
-    fn create_table_foreign_key_on_update_default_on_not_default() {
+    fn create_table_table_foreign_key_on_update_default_on_not_default() {
         let mut sim = Simulator::new(Box::new(GenericDialect {}));
         sim.execute("create table person (id uuid primary key, name text unique, phone int);")
             .unwrap();
