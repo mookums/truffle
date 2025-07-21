@@ -60,11 +60,68 @@ impl Simulator {
                                     JoinKind::On,
                                 )?;
                             }
+                            JoinConstraint::Using(names) => {
+                                let column_names: Vec<String> = names
+                                    .iter()
+                                    .map(|n| object_name_to_strings(n).first().unwrap().clone())
+                                    .collect();
+
+                                for column_name in column_names.iter() {
+                                    let left_ty = if let Some((col_ref, _)) = join_ctx
+                                        .refs
+                                        .iter()
+                                        .unique_by(|(_, idx)| *idx)
+                                        .filter(|(r, _)| &r.name == column_name)
+                                        .at_most_one()
+                                        .map_err(|_| {
+                                            Error::AmbiguousColumn(column_name.to_string())
+                                        })? {
+                                        let table_name = &col_ref.qualifier;
+                                        let column = self
+                                            .get_table(table_name)
+                                            .unwrap()
+                                            .get_column(column_name)
+                                            .unwrap();
+
+                                        Some(column.ty.clone())
+                                    } else {
+                                        None
+                                    };
+
+                                    let right_ty =
+                                        right_table.get_column(column_name).map(|rc| rc.ty.clone());
+
+                                    match (left_ty, right_ty) {
+                                        (Some(lty), Some(rty)) => {
+                                            if lty == rty {
+                                                continue;
+                                            } else {
+                                                return Err(Error::TypeMismatch {
+                                                    expected: lty,
+                                                    got: rty,
+                                                });
+                                            }
+                                        }
+                                        _ => {
+                                            return Err(Error::ColumnDoesntExist(
+                                                column_name.to_string(),
+                                            ));
+                                        }
+                                    }
+                                }
+
+                                join_ctx.join_table(
+                                    right_table,
+                                    &right_table_name,
+                                    right_table_alias,
+                                    JoinKind::Using(column_names),
+                                )?;
+                            }
                             JoinConstraint::Natural => {
                                 let mut found_common_column = false;
 
                                 // Check all columns from left tables against right table
-                                for (col_ref, _) in join_ctx.refs.iter() {
+                                for (col_ref, _) in join_ctx.refs.iter().unique_by(|r| *r.1) {
                                     let table_name = &col_ref.qualifier;
                                     let column_name = &col_ref.name;
 
@@ -107,7 +164,6 @@ impl Simulator {
                                     JoinKind::On,
                                 )?;
                             }
-                            _ => todo!(),
                         },
                         _ => todo!(),
                     }
@@ -145,6 +201,7 @@ pub struct JoinContext {
 enum JoinKind {
     On,
     Natural,
+    Using(Vec<String>),
 }
 
 impl JoinContext {
@@ -166,13 +223,6 @@ impl JoinContext {
                 refs.insert(ColumnRef::new(&table_name, column_name), i)
                     .is_none()
             );
-
-            // if let Some(alias) = aliases.get(&table_name) {
-            //     assert!(
-            //         refs.insert(ColumnRef::qualified(alias, column_name), i)
-            //             .is_none()
-            //     );
-            // }
 
             columns.push(column.clone());
         }
@@ -218,6 +268,38 @@ impl JoinContext {
 
                 for (column_name, column) in columns.iter() {
                     if all_existing_columns.contains(column_name) {
+                        let existing_index = self
+                            .refs
+                            .iter()
+                            .find_map(|(r, idx)| {
+                                if r.name == *column_name {
+                                    Some(*idx)
+                                } else {
+                                    None
+                                }
+                            })
+                            .unwrap();
+
+                        assert!(
+                            self.refs
+                                .insert(ColumnRef::new(&table_name, column_name), existing_index)
+                                .is_none()
+                        );
+                    } else {
+                        let index = self.columns.len();
+                        self.columns.push(column.clone());
+
+                        assert!(
+                            self.refs
+                                .insert(ColumnRef::new(&table_name, column_name), index)
+                                .is_none()
+                        );
+                    }
+                }
+            }
+            JoinKind::Using(commons) => {
+                for (column_name, column) in columns.iter() {
+                    if commons.contains(column_name) {
                         let existing_index = self
                             .refs
                             .iter()

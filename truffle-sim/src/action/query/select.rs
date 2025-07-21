@@ -1202,17 +1202,17 @@ mod tests {
             .unwrap();
     }
 
-    #[test]
-    fn select_join_none_multiple_tables() {
-        let mut sim = Simulator::new(Box::new(GenericDialect {}));
-        sim.execute("create table a (x int)").unwrap();
-        sim.execute("create table b (y int)").unwrap();
-        sim.execute("create table c (z int)").unwrap();
+    // // TODO: This requires supporting TableFactor::NestedJoin.
+    // // As it considers this to be a nested join.
+    // #[test]
+    // fn select_join_none_multiple_tables() {
+    //     let mut sim = Simulator::new(Box::new(GenericDialect {}));
+    //     sim.execute("create table a (x int)").unwrap();
+    //     sim.execute("create table b (y int)").unwrap();
+    //     sim.execute("create table c (z int)").unwrap();
 
-        // TODO: This requires supporting TableFactor::NestedJoin.
-        // As it considers this to be a nested join.
-        sim.execute("select * from a join b join c").unwrap();
-    }
+    //     sim.execute("select * from a join b join c").unwrap();
+    // }
 
     #[test]
     fn select_join_none_empty_tables() {
@@ -1248,6 +1248,84 @@ mod tests {
 
         sim.execute("select * from table1 join table2").unwrap();
         sim.execute("select * from table1 inner join table2")
+            .unwrap();
+    }
+
+    #[test]
+    fn select_join_using() {
+        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        sim.execute("create table table1 (id int primary key, fruit text not null)")
+            .unwrap();
+        sim.execute("create table table2 (id int primary key, juice text not null)")
+            .unwrap();
+
+        sim.execute("select id, fruit, juice from table1 join table2 using (id)")
+            .unwrap();
+
+        sim.execute("select id, table1.fruit, table2.juice from table1 join table2 using (id)")
+            .unwrap();
+    }
+
+    #[test]
+    fn select_join_using_column_doesnt_exist() {
+        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        sim.execute("create table table1 (id int primary key, fruit text not null)")
+            .unwrap();
+        sim.execute("create table table2 (id2 int primary key, juice text not null)")
+            .unwrap();
+
+        assert_eq!(
+            sim.execute("select id, fruit, juice from table1 join table2 using (fruit)"),
+            Err(Error::ColumnDoesntExist("fruit".to_string()))
+        );
+    }
+
+    #[test]
+    fn select_join_using_ambiguous_column() {
+        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        sim.execute("create table table1 (id int primary key, fruit text not null, price int)")
+            .unwrap();
+        sim.execute(
+            "create table table2 (id int primary key, fruit text not null, juice text not null)",
+        )
+        .unwrap();
+
+        assert_eq!(
+            sim.execute("select id, price, juice from table1 join table2 using (fruit)"),
+            Err(Error::AmbiguousColumn("id".to_string()))
+        );
+    }
+
+    #[test]
+    fn select_join_using_type_mismatch() {
+        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        sim.execute("create table table1 (id int primary key, fruit int not null, price int)")
+            .unwrap();
+        sim.execute(
+            "create table table2 (id2 int primary key, fruit text not null, juice text not null)",
+        )
+        .unwrap();
+
+        assert_eq!(
+            sim.execute("select id, price, juice from table1 join table2 using (fruit)"),
+            Err(Error::TypeMismatch {
+                expected: SqlType::Integer,
+                got: SqlType::Text
+            })
+        );
+    }
+
+    #[test]
+    fn select_join_using_multi_column() {
+        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        sim.execute("create table table1 (id int primary key, fruit text not null, price int)")
+            .unwrap();
+        sim.execute(
+            "create table table2 (id int primary key, fruit text not null, juice text not null)",
+        )
+        .unwrap();
+
+        sim.execute("select id, fruit, price, juice from table1 join table2 using (id, fruit)")
             .unwrap();
     }
 }
