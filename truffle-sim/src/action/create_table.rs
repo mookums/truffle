@@ -37,7 +37,7 @@ impl Simulator {
         let mut table = Table::default();
         for column in create_table.columns {
             let column_name = &column.name.value;
-            let mut nullable = false;
+            let mut nullable = true;
             let mut default = false;
             let ty: SqlType = column.data_type.into();
 
@@ -65,6 +65,7 @@ impl Simulator {
                     ColumnOption::Unique { is_primary, .. } => {
                         table.insert_constraint(&[column_name], Constraint::Unique);
                         if is_primary {
+                            nullable = false;
                             table.insert_constraint(&[column_name], Constraint::PrimaryKey);
                         }
                     }
@@ -179,6 +180,12 @@ impl Simulator {
                 TableConstraint::PrimaryKey { columns, .. } => {
                     let column_names: Vec<String> =
                         columns.iter().map(|c| c.value.to_string()).collect();
+
+                    if column_names.len() == 1 {
+                        let name = column_names.first().unwrap();
+                        let column = table.columns.get_mut(name).unwrap();
+                        column.nullable = false;
+                    }
 
                     for column_name in column_names.iter() {
                         if !table.has_column(column_name) {

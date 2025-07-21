@@ -6,7 +6,7 @@ mod ty;
 
 pub use sqlparser::dialect::*;
 use sqlparser::{
-    ast::{ObjectName, Statement, helpers::stmt_data_loading::StageLoadSelectItem},
+    ast::{ObjectName, Statement},
     parser::Parser,
 };
 use ty::SqlType;
@@ -48,6 +48,10 @@ pub enum Error {
     DefaultOnNotDefaultColumn(String),
     #[error("{0} cannot be used as a default. Use a literal value.")]
     InvalidDefault(String),
+    #[error("Column count mismatch: expected {expected} and got {got}")]
+    ColumnCountMismatch { expected: usize, got: usize },
+    #[error("Required column missing for '{0}'")]
+    RequiredColumnMissing(String),
     #[error("'{0}' is currently unsupported")]
     Unsupported(String),
 }
@@ -97,7 +101,7 @@ impl Simulator {
                 Statement::CreateTable(create_table) => self.create_table(create_table)?,
                 // TODO: Support Alter Table
                 Statement::Query(query) => self.query(query)?,
-                // TODO: Support Insert
+                Statement::Insert(insert) => self.insert(insert)?,
                 // TODO: Support Delete
                 Statement::Drop {
                     object_type, names, ..
