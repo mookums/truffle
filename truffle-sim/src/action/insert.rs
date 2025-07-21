@@ -28,7 +28,7 @@ impl ColumnInferrer for InsertInferrer {
 }
 
 impl Simulator {
-    pub(crate) fn insert(&mut self, ins: Insert) -> Result<(), Error> {
+    pub(crate) fn insert(&self, ins: Insert) -> Result<(), Error> {
         let TableObject::TableName(table_object_name) = ins.table else {
             todo!();
         };
