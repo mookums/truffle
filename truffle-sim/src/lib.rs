@@ -42,6 +42,10 @@ pub enum Error {
         expected: ColumnType,
         got: ColumnType,
     },
+    #[error("Cannot set not null column '{0}' to null")]
+    NullOnNotNullColumn(String),
+    #[error("Cannot set not default column '{0}' to default value")]
+    DefaultOnNotDefaultColumn(String),
     #[error("'{0}' is currently unsupported")]
     Unsupported(String),
 }
