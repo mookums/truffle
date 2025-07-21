@@ -1,14 +1,29 @@
 use std::collections::{HashMap, HashSet, hash_map::Entry};
 
+use sqlparser::ast::ReferentialAction;
+
 use crate::column::Column;
 
-#[derive(Debug, Hash, PartialEq, Eq)]
+#[derive(Debug, Hash, PartialEq, Eq, Default)]
 pub enum OnAction {
+    #[default]
     Nothing,
     Restrict,
     Cascade,
     SetNull,
     SetDefault,
+}
+
+impl From<ReferentialAction> for OnAction {
+    fn from(value: ReferentialAction) -> Self {
+        match value {
+            ReferentialAction::Restrict => OnAction::Restrict,
+            ReferentialAction::Cascade => OnAction::Cascade,
+            ReferentialAction::SetNull => OnAction::SetNull,
+            ReferentialAction::NoAction => OnAction::Nothing,
+            ReferentialAction::SetDefault => OnAction::SetDefault,
+        }
+    }
 }
 
 #[derive(Debug, Hash, PartialEq, Eq)]
