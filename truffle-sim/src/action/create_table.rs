@@ -4,26 +4,11 @@ use tracing::debug;
 use crate::{
     Error, Simulator,
     column::Column,
-    expr::{ColumnInferrer, infer_expr_type},
+    expr::ColumnInferrer,
     object_name_to_strings,
     table::{Constraint, Table},
     ty::SqlType,
 };
-
-struct CreateTableInferrer;
-impl ColumnInferrer for CreateTableInferrer {
-    fn infer_unqualified_type(
-        &self,
-        _: &Simulator,
-        column: &str,
-    ) -> Result<Option<SqlType>, Error> {
-        Err(Error::InvalidDefault(column.to_string()))
-    }
-
-    fn infer_qualified_type(&self, _: &Simulator, _: &str, column: &str) -> Result<SqlType, Error> {
-        Err(Error::InvalidDefault(column.to_string()))
-    }
-}
 
 impl Simulator {
     pub(crate) fn create_table(&mut self, create_table: CreateTable) -> Result<(), Error> {
@@ -52,7 +37,8 @@ impl Simulator {
                     }
                     ColumnOption::Default(expr) => {
                         let inferrer = CreateTableInferrer {};
-                        let default_ty = infer_expr_type(&expr, self, Some(ty.clone()), &inferrer)?;
+                        let default_ty =
+                            self.infer_expr_type(&expr, Some(ty.clone()), &inferrer)?;
                         if ty != default_ty {
                             return Err(Error::TypeMismatch {
                                 expected: ty,
@@ -290,6 +276,21 @@ impl Simulator {
         self.tables.insert(name, table);
 
         Ok(())
+    }
+}
+
+struct CreateTableInferrer;
+impl ColumnInferrer for CreateTableInferrer {
+    fn infer_unqualified_type(
+        &self,
+        _: &Simulator,
+        column: &str,
+    ) -> Result<Option<SqlType>, Error> {
+        Err(Error::InvalidDefault(column.to_string()))
+    }
+
+    fn infer_qualified_type(&self, _: &Simulator, _: &str, column: &str) -> Result<SqlType, Error> {
+        Err(Error::InvalidDefault(column.to_string()))
     }
 }
 

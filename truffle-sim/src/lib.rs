@@ -52,6 +52,8 @@ pub enum Error {
     ColumnCountMismatch { expected: usize, got: usize },
     #[error("Required column missing for '{0}'")]
     RequiredColumnMissing(String),
+    #[error("No common column")]
+    NoCommonColumn,
     #[error("'{0}' is currently unsupported")]
     Unsupported(String),
 }
@@ -102,6 +104,7 @@ impl Simulator {
                 // TODO: Support Alter Table
                 Statement::Query(query) => self.query(query)?,
                 Statement::Insert(insert) => self.insert(insert)?,
+                // Statement::Delete(delete) => self.delete(delete)?,
                 // TODO: Support Delete
                 Statement::Drop {
                     object_type, names, ..
