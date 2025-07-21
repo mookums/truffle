@@ -33,20 +33,6 @@ impl Simulator {
                         return Err(Error::AliasIsTableName(alias.to_string()));
                     }
 
-                    // join needs to work entirely on a fake set of temp tables that
-                    // is able to track the original column and source column for resolution.
-                    //
-                    // 1. so each (expr) within the join chain ONLY has access to the join_table
-                    // as its reference to infer an expr type from.
-                    //
-                    // 2. our temp table is like a redirect layer, where it matches any qualifier and then
-                    // just redirects it to the linked table. this qualifier can also be an alias.
-                    //
-                    // 3. we need to store both the name and the qualifier for the column.
-                    //
-                    // 4. instead of adding whatever tables to be used by the select inferrer,
-                    // we need to take a set of tables created from the join temp tables.
-
                     match &join.join_operator {
                         JoinOperator::Join(join_constraint)
                         | JoinOperator::Inner(join_constraint) => match join_constraint {
@@ -161,7 +147,7 @@ impl JoinContext {
         let mut columns: Vec<String> = table.columns.iter().map(|c| c.0.clone()).collect();
         let table_name = name.to_string();
         match self.tables.entry(table_name) {
-            Entry::Occupied(mut entry) => _ = entry.get_mut().append(&mut columns),
+            Entry::Occupied(mut entry) => entry.get_mut().append(&mut columns),
             Entry::Vacant(entry) => _ = entry.insert(columns),
         };
 
@@ -226,7 +212,7 @@ impl JoinContext {
             *matched = true;
             if table.contains(&column.to_string()) {
                 return Some(
-                    sim.get_table(&table_name)
+                    sim.get_table(table_name)
                         .unwrap()
                         .get_column(column)
                         .unwrap()
@@ -254,9 +240,11 @@ impl<'a> ColumnInferrer for JoinInferrer<'a> {
 
         for join_ctx in self.join_contexts {
             let new_found_ty = join_ctx.infer_unqualified_type(sim, column)?;
-            match found_ty {
-                Some(_) => return Err(Error::AmbiguousColumn(column.to_string())),
-                None => found_ty = new_found_ty,
+            if let Some(ty) = new_found_ty {
+                match found_ty {
+                    Some(_) => return Err(Error::AmbiguousColumn(column.to_string())),
+                    None => found_ty = Some(ty),
+                }
             }
         }
 
@@ -323,7 +311,7 @@ impl<'a> ColumnInferrer for JoinContextInferrer<'a> {
             .join_ctx
             .infer_qualified_type(sim, qualifier, column, &mut matched)
         {
-            return Ok(ty);
+            Ok(ty)
         } else {
             // Otherwise, try to find it in the right table...
             if self.right_table.0 == qualifier {
