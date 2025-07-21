@@ -1,4 +1,13 @@
+use serde::de::IgnoredAny;
 use sqlparser::ast::{BinaryOperator, CastKind, Expr, UnaryOperator, Value};
+use time::{
+    Date, OffsetDateTime, PrimitiveDateTime, Time,
+    format_description::{
+        self,
+        well_known::{Iso8601, Rfc3339},
+    },
+};
+use uuid::Uuid;
 
 use crate::{Error, Simulator, ty::SqlType};
 
@@ -156,13 +165,58 @@ fn infer_value_type(value: &Value, expected: Option<SqlType>) -> Result<SqlType,
                 Err(Error::Sql("Number is too big".to_string()))
             }
         }
-        Value::SingleQuotedString(_)
-        | Value::DollarQuotedString(_)
-        | Value::SingleQuotedByteStringLiteral(_)
-        | Value::DoubleQuotedByteStringLiteral(_)
-        | Value::NationalStringLiteral(_)
-        | Value::HexStringLiteral(_)
-        | Value::DoubleQuotedString(_) => Ok(SqlType::Text),
+        Value::SingleQuotedString(str)
+        | Value::SingleQuotedByteStringLiteral(str)
+        | Value::DoubleQuotedByteStringLiteral(str)
+        | Value::NationalStringLiteral(str)
+        | Value::HexStringLiteral(str)
+        | Value::DoubleQuotedString(str) => {
+            if let Some(expected_ty) = expected {
+                match expected_ty {
+                    SqlType::Timestamp => {
+                        let format = format_description::parse(
+                            "[year]-[month]-[day] [hour]:[minute]:[second]",
+                        )
+                        .unwrap();
+                        if PrimitiveDateTime::parse(str, &format).is_ok() {
+                            return Ok(SqlType::Timestamp);
+                        }
+                    }
+                    SqlType::TimestampTz => {
+                        if OffsetDateTime::parse(str, &Iso8601::DEFAULT).is_ok() {
+                            return Ok(SqlType::TimestampTz);
+                        }
+
+                        if OffsetDateTime::parse(str, &Rfc3339).is_ok() {
+                            return Ok(SqlType::TimestampTz);
+                        }
+                    }
+                    SqlType::Time => {
+                        if Time::parse(str, &Iso8601::DEFAULT).is_ok() {
+                            return Ok(SqlType::Time);
+                        }
+                    }
+                    SqlType::Date => {
+                        if Date::parse(str, &Iso8601::DEFAULT).is_ok() {
+                            return Ok(SqlType::Date);
+                        }
+                    }
+                    SqlType::Uuid => {
+                        if Uuid::parse_str(str).is_ok() {
+                            return Ok(SqlType::Uuid);
+                        }
+                    }
+                    SqlType::Json => {
+                        if serde_json::from_str::<IgnoredAny>(str).is_ok() {
+                            return Ok(SqlType::Json);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+
+            Ok(SqlType::Text)
+        }
         Value::Boolean(_) => Ok(SqlType::Boolean),
         Value::Null => Ok(SqlType::Null),
         Value::Placeholder(_) => expected
