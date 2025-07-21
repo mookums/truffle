@@ -48,6 +48,7 @@ pub fn handle_create_table(sim: &mut Simulator, create_table: CreateTable) -> Re
                     foreign_table,
                     referred_columns,
                     on_delete,
+                    on_update,
                     ..
                 } => {
                     let foreign_table_name = object_name_to_strings(&foreign_table)
@@ -60,8 +61,13 @@ pub fn handle_create_table(sim: &mut Simulator, create_table: CreateTable) -> Re
                         .get_table(&foreign_table_name)
                         .ok_or_else(|| Error::TableDoesntExist(foreign_table_name.to_string()))?;
 
+                    if referred_columns.len() > 1 {
+                        return Err(Error::Sql(
+                            "Cannot have more than 1 foreign column".to_string(),
+                        ));
+                    }
                     let mut foreign_columns = vec![];
-                    for foreign_column in referred_columns {
+                    if let Some(foreign_column) = referred_columns.first() {
                         let foreign_column_name = &foreign_column.value;
 
                         // Verify that foreign column exists.
@@ -86,7 +92,11 @@ pub fn handle_create_table(sim: &mut Simulator, create_table: CreateTable) -> Re
                         }
 
                         if let Some(on_delete) = on_delete {
-                            validate_on_delete(&on_delete, &name, nullable, default)?;
+                            validate_on_action(&on_delete, &name, nullable, default)?;
+                        }
+
+                        if let Some(on_update) = on_update {
+                            validate_on_action(&on_update, &name, nullable, default)?;
                         }
 
                         foreign_columns.push(foreign_column_name.to_string());
@@ -130,6 +140,7 @@ pub fn handle_create_table(sim: &mut Simulator, create_table: CreateTable) -> Re
                 foreign_table,
                 referred_columns,
                 on_delete,
+                on_update,
                 ..
             } => {
                 // TODO: Properly support foreign key names.
@@ -170,8 +181,17 @@ pub fn handle_create_table(sim: &mut Simulator, create_table: CreateTable) -> Re
                     }
 
                     if let Some(on_delete) = on_delete {
-                        validate_on_delete(
+                        validate_on_action(
                             &on_delete,
+                            local_col_name,
+                            local_column.nullable,
+                            local_column.default,
+                        )?;
+                    }
+
+                    if let Some(on_update) = on_update {
+                        validate_on_action(
+                            &on_update,
                             local_col_name,
                             local_column.nullable,
                             local_column.default,
@@ -208,7 +228,7 @@ pub fn handle_create_table(sim: &mut Simulator, create_table: CreateTable) -> Re
     Ok(())
 }
 
-fn validate_on_delete(
+fn validate_on_action(
     ref_act: &ReferentialAction,
     column_name: &str,
     nullable: bool,
@@ -500,6 +520,46 @@ mod tests {
                     order_id uuid primary key,
                     person_id uuid,
                     foreign key (person_id) references person(id) on delete set default
+                );
+            "#,
+            ),
+            Err(Error::DefaultOnNotDefaultColumn("person_id".to_string()))
+        );
+    }
+
+    #[test]
+    fn create_table_foreign_key_on_update_null_on_not_null() {
+        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        sim.execute("create table person (id uuid primary key, name text unique, phone int);")
+            .unwrap();
+
+        assert_eq!(
+            sim.execute(
+                r#"
+                create table order(
+                    order_id uuid primary key,
+                    person_id uuid not null,
+                    foreign key (person_id) references person(id) on update set null
+                );
+            "#,
+            ),
+            Err(Error::NullOnNotNullColumn("person_id".to_string()))
+        );
+    }
+
+    #[test]
+    fn create_table_foreign_key_on_update_default_on_not_default() {
+        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        sim.execute("create table person (id uuid primary key, name text unique, phone int);")
+            .unwrap();
+
+        assert_eq!(
+            sim.execute(
+                r#"
+                create table order(
+                    order_id uuid primary key,
+                    person_id uuid,
+                    foreign key (person_id) references person(id) on update set default
                 );
             "#,
             ),
