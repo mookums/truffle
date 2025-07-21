@@ -5,7 +5,7 @@ use crate::{
     Error, Simulator,
     column::{Column, ColumnType},
     object_name_to_strings,
-    table::{Constraint, Table},
+    table::{Constraint, OnAction, Table},
 };
 
 pub fn handle_create_table(sim: &mut Simulator, create_table: CreateTable) -> Result<(), Error> {
@@ -66,7 +66,11 @@ pub fn handle_create_table(sim: &mut Simulator, create_table: CreateTable) -> Re
                             "Cannot have more than 1 foreign column".to_string(),
                         ));
                     }
+
                     let mut foreign_columns = vec![];
+                    let mut on_delete_act = OnAction::Nothing;
+                    let mut on_update_act = OnAction::Nothing;
+
                     if let Some(foreign_column) = referred_columns.first() {
                         let foreign_column_name = &foreign_column.value;
 
@@ -92,11 +96,13 @@ pub fn handle_create_table(sim: &mut Simulator, create_table: CreateTable) -> Re
                         }
 
                         if let Some(on_delete) = on_delete {
-                            validate_on_action(&on_delete, &name, nullable, default)?;
+                            on_delete_act =
+                                validate_on_action(&on_delete, &name, nullable, default)?;
                         }
 
                         if let Some(on_update) = on_update {
-                            validate_on_action(&on_update, &name, nullable, default)?;
+                            on_update_act =
+                                validate_on_action(&on_update, &name, nullable, default)?;
                         }
 
                         foreign_columns.push(foreign_column_name.to_string());
@@ -107,6 +113,8 @@ pub fn handle_create_table(sim: &mut Simulator, create_table: CreateTable) -> Re
                         Constraint::ForeignKey {
                             foreign_table: foreign_table_name,
                             foreign_columns,
+                            on_delete: on_delete_act,
+                            on_update: on_update_act,
                         },
                     );
                 }
@@ -162,6 +170,9 @@ pub fn handle_create_table(sim: &mut Simulator, create_table: CreateTable) -> Re
                     .map(|c| c.value.to_string())
                     .collect();
 
+                let mut on_delete_act = OnAction::Nothing;
+                let mut on_update_act = OnAction::Nothing;
+
                 for (local_col_name, foreign_col_name) in
                     local_column_names.iter().zip(foreign_column_names.iter())
                 {
@@ -181,7 +192,7 @@ pub fn handle_create_table(sim: &mut Simulator, create_table: CreateTable) -> Re
                     }
 
                     if let Some(on_delete) = on_delete {
-                        validate_on_action(
+                        on_delete_act = validate_on_action(
                             &on_delete,
                             local_col_name,
                             local_column.nullable,
@@ -190,7 +201,7 @@ pub fn handle_create_table(sim: &mut Simulator, create_table: CreateTable) -> Re
                     }
 
                     if let Some(on_update) = on_update {
-                        validate_on_action(
+                        on_update_act = validate_on_action(
                             &on_update,
                             local_col_name,
                             local_column.nullable,
@@ -211,13 +222,15 @@ pub fn handle_create_table(sim: &mut Simulator, create_table: CreateTable) -> Re
                     Constraint::ForeignKey {
                         foreign_table: foreign_table_name,
                         foreign_columns: foreign_column_names,
+                        on_delete: on_delete_act,
+                        on_update: on_update_act,
                     },
                 );
             }
             _ => {
-                return Err(Error::Unsupported(format!(
-                    "Unsupported table constraint on CREATE TABLE: {constraint:#?}"
-                )));
+                // return Err(Error::Unsupported(format!(
+                //     "Unsupported table constraint on CREATE TABLE: {constraint:#?}"
+                // )));
             }
         }
     }
@@ -233,22 +246,26 @@ fn validate_on_action(
     column_name: &str,
     nullable: bool,
     default: bool,
-) -> Result<(), Error> {
-    match ref_act {
-        ReferentialAction::Restrict | ReferentialAction::NoAction | ReferentialAction::Cascade => {}
+) -> Result<OnAction, Error> {
+    Ok(match ref_act {
+        ReferentialAction::NoAction => OnAction::Nothing,
+        ReferentialAction::Restrict => OnAction::Restrict,
+        ReferentialAction::Cascade => OnAction::Cascade,
         ReferentialAction::SetNull => {
             if !nullable {
                 return Err(Error::NullOnNotNullColumn(column_name.to_string()));
             }
+
+            OnAction::SetNull
         }
         ReferentialAction::SetDefault => {
             if !default {
                 return Err(Error::DefaultOnNotDefaultColumn(column_name.to_string()));
             }
-        }
-    }
 
-    Ok(())
+            OnAction::SetDefault
+        }
+    })
 }
 
 #[cfg(test)]

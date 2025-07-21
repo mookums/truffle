@@ -3,10 +3,21 @@ use std::collections::{HashMap, HashSet, hash_map::Entry};
 use crate::column::Column;
 
 #[derive(Debug, Hash, PartialEq, Eq)]
+pub enum OnAction {
+    Nothing,
+    Restrict,
+    Cascade,
+    SetNull,
+    SetDefault,
+}
+
+#[derive(Debug, Hash, PartialEq, Eq)]
 pub enum Constraint {
     ForeignKey {
         foreign_table: String,
         foreign_columns: Vec<String>,
+        on_delete: OnAction,
+        on_update: OnAction,
     },
     Unique,
     PrimaryKey,
