@@ -1,5 +1,9 @@
 use crate::ty::SqlType;
 
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
+
+#[cfg_attr(feature = "serde", derive(Deserialize, Serialize))]
 #[derive(Debug, Clone)]
 pub struct Column {
     pub ty: SqlType,

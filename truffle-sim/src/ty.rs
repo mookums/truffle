@@ -1,10 +1,13 @@
 use std::fmt::Display;
 
 use itertools::Itertools;
-use serde::Serialize;
 use sqlparser::ast::DataType;
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
+
+#[cfg_attr(feature = "serde", derive(Deserialize, Serialize))]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SqlType {
     // NULL
     Null,

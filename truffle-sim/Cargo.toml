@@ -3,8 +3,12 @@ name = "truffle-sim"
 version = "0.1.0"
 edition = "2024"
 
+[features]
+default = []
+serde = ["dep:serde", "indexmap/serde", "sqlparser/serde"]
+
 [dependencies]
-serde.workspace = true
+serde = { workspace = true, optional = true }
 tracing.workspace = true
 tracing-subscriber.workspace = true
 thiserror.workspace = true

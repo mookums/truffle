@@ -3,8 +3,12 @@ use std::collections::{HashMap, HashSet, hash_map::Entry};
 use indexmap::{IndexMap, map::IndexedEntry};
 use sqlparser::ast::ReferentialAction;
 
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
+
 use crate::column::Column;
 
+#[cfg_attr(feature = "serde", derive(Deserialize, Serialize))]
 #[derive(Debug, Clone, Hash, PartialEq, Eq, Default)]
 pub enum OnAction {
     #[default]
@@ -27,6 +31,7 @@ impl From<ReferentialAction> for OnAction {
     }
 }
 
+#[cfg_attr(feature = "serde", derive(Deserialize, Serialize))]
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub enum Constraint {
     ForeignKey {
@@ -46,6 +51,7 @@ impl Constraint {
     }
 }
 
+#[cfg_attr(feature = "serde", derive(Deserialize, Serialize))]
 #[derive(Clone, Debug, Default)]
 pub struct Table {
     pub columns: IndexMap<String, Column>,
