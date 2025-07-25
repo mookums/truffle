@@ -1,15 +1,15 @@
 use serde::de::IgnoredAny;
 use sqlparser::ast::{BinaryOperator, CastKind, Expr, UnaryOperator, Value};
 use time::{
-    Date, OffsetDateTime, PrimitiveDateTime, Time,
     format_description::{
         self,
         well_known::{Iso8601, Rfc3339},
     },
+    Date, OffsetDateTime, PrimitiveDateTime, Time,
 };
 use uuid::Uuid;
 
-use crate::{Error, Simulator, ty::SqlType};
+use crate::{ty::SqlType, Error, Simulator};
 
 pub trait ColumnInferrer {
     fn infer_unqualified_type(

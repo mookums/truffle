@@ -5,10 +5,10 @@ edition = "2024"
 
 [features]
 default = []
-serde = ["dep:serde", "indexmap/serde", "sqlparser/serde"]
+serde = ["indexmap/serde", "sqlparser/serde"]
 
 [dependencies]
-serde = { workspace = true, optional = true }
+serde = { workspace = true }
 tracing.workspace = true
 tracing-subscriber.workspace = true
 thiserror.workspace = true
