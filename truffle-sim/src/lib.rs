@@ -105,7 +105,6 @@ impl Simulator {
                 Statement::Query(query) => self.query(query)?,
                 Statement::Insert(insert) => self.insert(insert)?,
                 Statement::Delete(delete) => self.delete(delete)?,
-                // TODO: Support Delete
                 Statement::Drop {
                     object_type, names, ..
                 } => self.drop(&object_type, names)?,
