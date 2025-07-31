@@ -59,8 +59,8 @@ pub enum Error {
 }
 
 #[derive(Debug)]
-pub struct Simulator {
-    dialect: Box<dyn Dialect>,
+pub struct Simulator<D: Dialect> {
+    dialect: D,
     tables: HashMap<String, Table>,
 }
 
@@ -71,9 +71,9 @@ fn object_name_to_strings(name: &ObjectName) -> Vec<String> {
         .collect()
 }
 
-impl Simulator {
+impl<D: Dialect> Simulator<D> {
     /// Construct a new Simulator with the given SQL Dialect.
-    pub fn new(dialect: Box<dyn Dialect>) -> Self {
+    pub fn new(dialect: D) -> Self {
         Self {
             dialect,
             tables: HashMap::new(),
@@ -94,9 +94,9 @@ impl Simulator {
     }
 
     /// Executes the given SQL in the Simulator and updates the state.
-    pub fn execute(&mut self, sql: &str) -> Result<(), Error> {
-        let parser = Parser::new(&*self.dialect);
-        let statements = parser.try_with_sql(sql)?.parse_statements()?;
+    pub fn execute(&mut self, sql: impl AsRef<str>) -> Result<(), Error> {
+        let parser = Parser::new(&self.dialect);
+        let statements = parser.try_with_sql(sql.as_ref())?.parse_statements()?;
 
         for statement in statements {
             match statement {
@@ -122,7 +122,7 @@ mod tests {
 
     #[test]
     fn invalid_sql() {
-        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        let mut sim = Simulator::new(GenericDialect {});
         assert!(matches!(
             sim.execute("create eveyrthing (id int);"),
             Err(Error::Parsing(_))

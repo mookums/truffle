@@ -1,9 +1,12 @@
-use sqlparser::ast::{ObjectName, ObjectType};
+use sqlparser::{
+    ast::{ObjectName, ObjectType},
+    dialect::Dialect,
+};
 use tracing::{debug, warn};
 
 use crate::{Error, Simulator, object_name_to_strings, table::Constraint};
 
-impl Simulator {
+impl<D: Dialect> Simulator<D> {
     pub(crate) fn drop(
         &mut self,
         object_type: &ObjectType,
@@ -44,7 +47,7 @@ mod tests {
 
     #[test]
     fn drop_table_success() {
-        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        let mut sim = Simulator::new(GenericDialect {});
         sim.execute("create table person (id uuid, name text, weight real);")
             .unwrap();
         assert_eq!(sim.tables.len(), 1);
@@ -54,7 +57,7 @@ mod tests {
 
     #[test]
     fn drop_table_doesnt_exist() {
-        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        let mut sim = Simulator::new(GenericDialect {});
         assert_eq!(
             sim.execute("drop table person;"),
             Err(Error::TableDoesntExist("person".to_string()))
@@ -63,7 +66,7 @@ mod tests {
 
     #[test]
     fn drop_table_foreign_key_constaint() {
-        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        let mut sim = Simulator::new(GenericDialect {});
         sim.execute("create table person (id int primary key, name text)")
             .unwrap();
         sim.execute("create table order (id int primary key, person_id int references person(id))")

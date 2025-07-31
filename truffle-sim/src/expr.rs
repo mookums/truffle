@@ -1,33 +1,36 @@
 use serde::de::IgnoredAny;
-use sqlparser::ast::{BinaryOperator, CastKind, Expr, UnaryOperator, Value};
+use sqlparser::{
+    ast::{BinaryOperator, CastKind, Expr, UnaryOperator, Value},
+    dialect::Dialect,
+};
 use time::{
+    Date, OffsetDateTime, PrimitiveDateTime, Time,
     format_description::{
         self,
         well_known::{Iso8601, Rfc3339},
     },
-    Date, OffsetDateTime, PrimitiveDateTime, Time,
 };
 use uuid::Uuid;
 
-use crate::{ty::SqlType, Error, Simulator};
+use crate::{Error, Simulator, ty::SqlType};
 
-pub trait ColumnInferrer {
+pub trait ColumnInferrer<D: Dialect> {
     fn infer_unqualified_type(
         &self,
-        sim: &Simulator,
+        sim: &Simulator<D>,
         column: &str,
     ) -> Result<Option<SqlType>, Error>;
 
     fn infer_qualified_type(
         &self,
-        sim: &Simulator,
+        sim: &Simulator<D>,
         qualifier: &str,
         column: &str,
     ) -> Result<SqlType, Error>;
 }
 
-impl Simulator {
-    pub(crate) fn infer_expr_type<I: ColumnInferrer>(
+impl<D: Dialect> Simulator<D> {
+    pub(crate) fn infer_expr_type<I: ColumnInferrer<D>>(
         &self,
         expr: &Expr,
         expected: Option<SqlType>,
@@ -246,7 +249,7 @@ impl Simulator {
         }
     }
 
-    fn infer_binary_op_type<I: ColumnInferrer>(
+    fn infer_binary_op_type<I: ColumnInferrer<D>>(
         &self,
         left: &Expr,
         right: &Expr,
@@ -321,7 +324,7 @@ impl Simulator {
         }
     }
 
-    fn infer_unary_op_type<I: ColumnInferrer>(
+    fn infer_unary_op_type<I: ColumnInferrer<D>>(
         &self,
         expr: &Expr,
         op: &UnaryOperator,

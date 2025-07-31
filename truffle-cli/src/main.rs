@@ -3,7 +3,7 @@ use std::{fs::read_to_string, path::Path};
 use clap::Parser;
 use rustyline::{DefaultEditor, error::ReadlineError};
 use tracing::{error, info};
-use truffle_sim::{GenericDialect, Simulator};
+use truffle_sim::{Dialect, GenericDialect, Simulator};
 
 #[derive(clap::Parser)]
 #[command(version)]
@@ -27,7 +27,7 @@ fn main() {
     match cli.command {
         Commands::Validate { path } => {
             let sql = read_to_string(path).unwrap();
-            let mut sim = Simulator::new(Box::new(GenericDialect {}));
+            let mut sim = Simulator::new(GenericDialect {});
             if let Err(err) = sim.execute(&sql) {
                 info!("{sim:#?}");
                 error!("{err}");
@@ -37,7 +37,7 @@ fn main() {
             }
         }
         Commands::Repl => {
-            fn execute_sql(sim: &mut Simulator, sql: &str) {
+            fn execute_sql<D: Dialect>(sim: &mut Simulator<D>, sql: &str) {
                 match sim.execute(sql) {
                     Ok(_) => {
                         println!("✅ ok");
@@ -48,7 +48,7 @@ fn main() {
                 };
             }
 
-            let mut sim = Simulator::new(Box::new(GenericDialect {}));
+            let mut sim = Simulator::new(GenericDialect {});
             let mut rl = DefaultEditor::new().unwrap();
 
             println!("truffle repl!");

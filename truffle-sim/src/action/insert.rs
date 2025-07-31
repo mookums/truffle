@@ -1,8 +1,11 @@
-use sqlparser::ast::{Insert, SetExpr, TableObject};
+use sqlparser::{
+    ast::{Insert, SetExpr, TableObject},
+    dialect::Dialect,
+};
 
 use crate::{Error, Simulator, expr::ColumnInferrer, object_name_to_strings};
 
-impl Simulator {
+impl<D: Dialect> Simulator<D> {
     pub(crate) fn insert(&self, ins: Insert) -> Result<(), Error> {
         let TableObject::TableName(table_object_name) = ins.table else {
             todo!();
@@ -27,7 +30,7 @@ impl Simulator {
             provided_columns.push(column_name);
         }
 
-        let inferrer = InsertInferrer {};
+        let inferrer = InsertInferrer::default();
 
         let source = ins.source.unwrap();
         match *source.body {
@@ -90,12 +93,13 @@ impl Simulator {
     }
 }
 
+#[derive(Default)]
 struct InsertInferrer {}
 
-impl ColumnInferrer for InsertInferrer {
+impl<D: Dialect> ColumnInferrer<D> for InsertInferrer {
     fn infer_unqualified_type(
         &self,
-        _: &Simulator,
+        _: &Simulator<D>,
         _: &str,
     ) -> Result<Option<crate::ty::SqlType>, Error> {
         Err(Error::Unsupported(
@@ -105,7 +109,7 @@ impl ColumnInferrer for InsertInferrer {
 
     fn infer_qualified_type(
         &self,
-        _: &Simulator,
+        _: &Simulator<D>,
         _: &str,
         _: &str,
     ) -> Result<crate::ty::SqlType, Error> {
@@ -121,7 +125,7 @@ mod tests {
 
     #[test]
     fn insert_table_by_column_index() {
-        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        let mut sim = Simulator::new(GenericDialect {});
         sim.execute("create table person (id integer not null, name text, weight real);")
             .unwrap();
         sim.execute("insert into person values (10, 'John Doe', ?)")
@@ -130,7 +134,7 @@ mod tests {
 
     #[test]
     fn insert_table_by_column_name() {
-        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        let mut sim = Simulator::new(GenericDialect {});
         sim.execute("create table person (id integer not null, name text, weight real);")
             .unwrap();
         sim.execute("insert into person (weight, name, id) values (221.9, 'John Doe', 10)")
@@ -139,7 +143,7 @@ mod tests {
 
     #[test]
     fn insert_column_count_mismatch() {
-        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        let mut sim = Simulator::new(GenericDialect {});
         sim.execute("create table person (id integer not null, name text, weight real);")
             .unwrap();
         assert_eq!(
@@ -155,7 +159,7 @@ mod tests {
 
     #[test]
     fn insert_column_type_mismatch() {
-        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        let mut sim = Simulator::new(GenericDialect {});
         sim.execute("create table person (id integer not null, name text, weight real);")
             .unwrap();
         assert_eq!(
@@ -169,7 +173,7 @@ mod tests {
 
     #[test]
     fn insert_column_doesnt_exist() {
-        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        let mut sim = Simulator::new(GenericDialect {});
         sim.execute("create table person (id integer not null, name text, weight real);")
             .unwrap();
         assert_eq!(
@@ -180,7 +184,7 @@ mod tests {
 
     #[test]
     fn insert_multiple_rows_success() {
-        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        let mut sim = Simulator::new(GenericDialect {});
         sim.execute("create table person (id integer, name text);")
             .unwrap();
         sim.execute("insert into person values (1, 'John'), (2, 'Jane'), (3, 'Bob')")
@@ -189,7 +193,7 @@ mod tests {
 
     #[test]
     fn insert_multiple_rows_type_error() {
-        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        let mut sim = Simulator::new(GenericDialect {});
         sim.execute("create table person (id integer, name text);")
             .unwrap();
 
@@ -204,7 +208,7 @@ mod tests {
 
     #[test]
     fn insert_multiple_rows_count_mismatch() {
-        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        let mut sim = Simulator::new(GenericDialect {});
         sim.execute("create table person (id integer, name text);")
             .unwrap();
 
@@ -219,7 +223,7 @@ mod tests {
 
     #[test]
     fn insert_partial_columns_success() {
-        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        let mut sim = Simulator::new(GenericDialect {});
         sim.execute("create table person (id integer, name text, weight real);")
             .unwrap();
         sim.execute("insert into person (id, name) values (1, 'John')")
@@ -228,7 +232,7 @@ mod tests {
 
     #[test]
     fn insert_missing_required_column() {
-        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        let mut sim = Simulator::new(GenericDialect {});
         sim.execute(
             "create table person (id integer not null, name text not null, weight real not null);",
         )

@@ -1,7 +1,10 @@
 use std::collections::HashSet;
 
 use itertools::Itertools;
-use sqlparser::ast::{Expr, Select, SelectItem, SelectItemQualifiedWildcardKind, TableFactor};
+use sqlparser::{
+    ast::{Expr, Select, SelectItem, SelectItemQualifiedWildcardKind, TableFactor},
+    dialect::Dialect,
+};
 
 use crate::{
     Error, Simulator,
@@ -11,7 +14,7 @@ use crate::{
     ty::SqlType,
 };
 
-impl Simulator {
+impl<D: Dialect> Simulator<D> {
     pub(crate) fn select(&self, sel: &Select) -> Result<(), Error> {
         let mut columns = SelectColumns::List(vec![]);
         let mut contexts = vec![];
@@ -265,7 +268,7 @@ mod tests {
 
     #[test]
     fn select_wildcard_success() {
-        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        let mut sim = Simulator::new(GenericDialect {});
         sim.execute("create table person (id int, name text)")
             .unwrap();
 
@@ -275,7 +278,7 @@ mod tests {
 
     #[test]
     fn select_fields_success() {
-        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        let mut sim = Simulator::new(GenericDialect {});
         sim.execute("create table person (id int, name text)")
             .unwrap();
 
@@ -284,7 +287,7 @@ mod tests {
 
     #[test]
     fn select_column_doesnt_exist() {
-        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        let mut sim = Simulator::new(GenericDialect {});
         sim.execute("create table person (id int, name text)")
             .unwrap();
 
@@ -296,7 +299,7 @@ mod tests {
 
     #[test]
     fn select_from_missing_table() {
-        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        let mut sim = Simulator::new(GenericDialect {});
         assert_eq!(
             sim.execute("select * from person;"),
             Err(Error::TableDoesntExist("person".to_string()))
@@ -305,7 +308,7 @@ mod tests {
 
     #[test]
     fn select_ambiguous_column() {
-        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        let mut sim = Simulator::new(GenericDialect {});
         sim.execute("create table person (id int, name text)")
             .unwrap();
         sim.execute("create table orders (id int, total int)")
@@ -319,7 +322,7 @@ mod tests {
 
     #[test]
     fn select_wildcard_ambiguous_column() {
-        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        let mut sim = Simulator::new(GenericDialect {});
         sim.execute("create table person (id int, name text)")
             .unwrap();
         sim.execute("create table orders (id int, total int)")
@@ -333,7 +336,7 @@ mod tests {
 
     #[test]
     fn select_multiple_tables_wildcard() {
-        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        let mut sim = Simulator::new(GenericDialect {});
         sim.execute("create table person (id int, name text)")
             .unwrap();
         sim.execute("create table orders (order_id int, total int)")
@@ -343,7 +346,7 @@ mod tests {
 
     #[test]
     fn select_multiple_tables_unique_columns() {
-        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        let mut sim = Simulator::new(GenericDialect {});
         sim.execute("create table person (id int, name text)")
             .unwrap();
         sim.execute("create table orders (order_id int, total int)")
@@ -354,7 +357,7 @@ mod tests {
 
     #[test]
     fn select_multiple_tables_column_doesnt_exist() {
-        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        let mut sim = Simulator::new(GenericDialect {});
         sim.execute("create table person (id int, name text)")
             .unwrap();
         sim.execute("create table orders (order_id int, total int)")
@@ -368,7 +371,7 @@ mod tests {
 
     #[test]
     fn select_multiple_tables_with_aliases() {
-        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        let mut sim = Simulator::new(GenericDialect {});
         sim.execute("create table person (id int, name text)")
             .unwrap();
         sim.execute("create table orders (order_id int, total int)")
@@ -379,7 +382,7 @@ mod tests {
 
     #[test]
     fn select_multiple_tables_with_as_aliases() {
-        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        let mut sim = Simulator::new(GenericDialect {});
         sim.execute("create table person (id int, name text)")
             .unwrap();
         sim.execute("create table orders (order_id int, total int)")
@@ -390,7 +393,7 @@ mod tests {
 
     #[test]
     fn select_qualified_column_with_unknown_table() {
-        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        let mut sim = Simulator::new(GenericDialect {});
         sim.execute("create table person (id int, name text)")
             .unwrap();
 
@@ -402,7 +405,7 @@ mod tests {
 
     #[test]
     fn select_qualified_column_with_unincluded_table() {
-        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        let mut sim = Simulator::new(GenericDialect {});
         sim.execute("create table person (id int, name text)")
             .unwrap();
 
@@ -417,7 +420,7 @@ mod tests {
 
     #[test]
     fn select_alias_conflicts_with_table_name() {
-        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        let mut sim = Simulator::new(GenericDialect {});
         sim.execute("create table person (id int, name text)")
             .unwrap();
         sim.execute("create table orders (id int, total int)")
@@ -431,7 +434,7 @@ mod tests {
 
     #[test]
     fn select_qualified_wildcard() {
-        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        let mut sim = Simulator::new(GenericDialect {});
         sim.execute("create table person (id int, name text)")
             .unwrap();
 
@@ -440,7 +443,7 @@ mod tests {
 
     #[test]
     fn select_qualified_wildcard_with_alias() {
-        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        let mut sim = Simulator::new(GenericDialect {});
         sim.execute("create table person (id int, name text)")
             .unwrap();
         sim.execute("create table orders (id int, total int)")
@@ -451,7 +454,7 @@ mod tests {
 
     #[test]
     fn select_qualified_wildcard_with_unknown_table() {
-        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        let mut sim = Simulator::new(GenericDialect {});
         sim.execute("create table person (id int, name text)")
             .unwrap();
 
@@ -463,7 +466,7 @@ mod tests {
 
     #[test]
     fn select_qualified_wildcard_table_not_in_from() {
-        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        let mut sim = Simulator::new(GenericDialect {});
         sim.execute("create table person (id int, name text)")
             .unwrap();
         sim.execute("create table orders (id int, total int)")
@@ -477,7 +480,7 @@ mod tests {
 
     #[test]
     fn select_multiple_qualified_wildcards() {
-        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        let mut sim = Simulator::new(GenericDialect {});
         sim.execute("create table person (id int, name text)")
             .unwrap();
         sim.execute("create table orders (id int, total int)")
@@ -489,7 +492,7 @@ mod tests {
 
     #[test]
     fn select_qualified_wildcard_with_columns() {
-        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        let mut sim = Simulator::new(GenericDialect {});
         sim.execute("create table person (id int, name text)")
             .unwrap();
         sim.execute("create table orders (order_id int, total int)")
@@ -501,7 +504,7 @@ mod tests {
 
     #[test]
     fn select_where() {
-        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        let mut sim = Simulator::new(GenericDialect {});
         sim.execute("create table person (id int, name text)")
             .unwrap();
 
@@ -511,7 +514,7 @@ mod tests {
 
     #[test]
     fn select_where_column_doesnt_exist() {
-        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        let mut sim = Simulator::new(GenericDialect {});
         sim.execute("create table person (id int, name text)")
             .unwrap();
 
@@ -523,7 +526,7 @@ mod tests {
 
     #[test]
     fn select_where_simple_comparison() {
-        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        let mut sim = Simulator::new(GenericDialect {});
         sim.execute("create table person (id int, name text, age int)")
             .unwrap();
         sim.execute("select name from person where age > 18")
@@ -533,7 +536,7 @@ mod tests {
 
     #[test]
     fn select_where_tuple_comparison() {
-        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        let mut sim = Simulator::new(GenericDialect {});
         sim.execute("create table person (id int, name text, age int)")
             .unwrap();
         sim.execute("select name from person where (id, name) = (1, 'abc')")
@@ -542,7 +545,7 @@ mod tests {
 
     #[test]
     fn select_where_logical_operators() {
-        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        let mut sim = Simulator::new(GenericDialect {});
         sim.execute("create table person (id int, name text, age int)")
             .unwrap();
         sim.execute("select name from person where age > 18 AND name = 'John'")
@@ -555,7 +558,7 @@ mod tests {
 
     #[test]
     fn select_where_qualified_columns() {
-        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        let mut sim = Simulator::new(GenericDialect {});
         sim.execute("create table person (id int, name text)")
             .unwrap();
         sim.execute("create table company (id int, name text)")
@@ -566,7 +569,7 @@ mod tests {
 
     #[test]
     fn select_where_ambiguous_column() {
-        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        let mut sim = Simulator::new(GenericDialect {});
         sim.execute("create table person (id int, name text)")
             .unwrap();
         sim.execute("create table company (id int, name text)")
@@ -579,7 +582,7 @@ mod tests {
 
     #[test]
     fn select_where_with_aliases() {
-        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        let mut sim = Simulator::new(GenericDialect {});
         sim.execute("create table person (id int, name text)")
             .unwrap();
         sim.execute("create table company (id int, name text)")
@@ -590,7 +593,7 @@ mod tests {
 
     #[test]
     fn select_where_nested_expressions() {
-        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        let mut sim = Simulator::new(GenericDialect {});
         sim.execute("create table person (id int, name text, age int)")
             .unwrap();
         sim.execute(
@@ -606,7 +609,7 @@ mod tests {
 
     #[test]
     fn select_where_invalid_qualified_column() {
-        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        let mut sim = Simulator::new(GenericDialect {});
         sim.execute("create table person (id int, name text)")
             .unwrap();
         assert_eq!(
@@ -617,7 +620,7 @@ mod tests {
 
     #[test]
     fn select_where_invalid_table_reference() {
-        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        let mut sim = Simulator::new(GenericDialect {});
         sim.execute("create table person (id int, name text)")
             .unwrap();
         assert_eq!(
@@ -628,7 +631,7 @@ mod tests {
 
     #[test]
     fn select_where_invalid_alias() {
-        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        let mut sim = Simulator::new(GenericDialect {});
         sim.execute("create table person (id int, name text)")
             .unwrap();
         assert_eq!(
@@ -639,7 +642,7 @@ mod tests {
 
     #[test]
     fn select_where_invalid_type() {
-        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        let mut sim = Simulator::new(GenericDialect {});
         sim.execute("create table person (id int, name text)")
             .unwrap();
         assert_eq!(
@@ -653,7 +656,7 @@ mod tests {
 
     #[test]
     fn select_where_invalid_tuple() {
-        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        let mut sim = Simulator::new(GenericDialect {});
         sim.execute("create table person (id int, name text)")
             .unwrap();
         assert_eq!(
@@ -667,7 +670,7 @@ mod tests {
 
     #[test]
     fn select_where_invalid_type_string_with_int() {
-        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        let mut sim = Simulator::new(GenericDialect {});
         sim.execute("create table person (id int, name text)")
             .unwrap();
         assert_eq!(
@@ -681,7 +684,7 @@ mod tests {
 
     #[test]
     fn select_where_invalid_type_bool_with_text() {
-        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        let mut sim = Simulator::new(GenericDialect {});
         sim.execute("create table person (id int, name text)")
             .unwrap();
         assert_eq!(
@@ -695,7 +698,7 @@ mod tests {
 
     #[test]
     fn select_where_invalid_type_int_with_bool() {
-        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        let mut sim = Simulator::new(GenericDialect {});
         sim.execute("create table person (active bool)").unwrap();
         assert_eq!(
             sim.execute("select * from person where active = 123"),
@@ -708,7 +711,7 @@ mod tests {
 
     #[test]
     fn select_where_invalid_type_arithmetic() {
-        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        let mut sim = Simulator::new(GenericDialect {});
         sim.execute("create table person (id int)").unwrap();
         assert_eq!(
             sim.execute("select * from person where id + 'hello' > 10"),
@@ -721,7 +724,7 @@ mod tests {
 
     #[test]
     fn select_where_invalid_type_comparison() {
-        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        let mut sim = Simulator::new(GenericDialect {});
         sim.execute("create table person (id int)").unwrap();
         assert_eq!(
             sim.execute("select * from person where id > 'five'"),
@@ -734,7 +737,7 @@ mod tests {
 
     #[test]
     fn select_where_invalid_type_logical_and() {
-        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        let mut sim = Simulator::new(GenericDialect {});
         sim.execute("create table person (id int, active bool)")
             .unwrap();
         assert_eq!(
@@ -748,7 +751,7 @@ mod tests {
 
     #[test]
     fn select_where_invalid_type_not_operator() {
-        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        let mut sim = Simulator::new(GenericDialect {});
         sim.execute("create table person (id int)").unwrap();
         assert_eq!(
             sim.execute("select * from person where NOT id"),
@@ -761,7 +764,7 @@ mod tests {
 
     #[test]
     fn select_where_invalid_type_unary_minus() {
-        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        let mut sim = Simulator::new(GenericDialect {});
         sim.execute("create table person (active bool)").unwrap();
         assert_eq!(
             sim.execute("select * from person where -active"),
@@ -771,7 +774,7 @@ mod tests {
 
     #[test]
     fn select_where_invalid_type_in_list() {
-        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        let mut sim = Simulator::new(GenericDialect {});
         sim.execute("create table person (id int)").unwrap();
         assert_eq!(
             sim.execute("select * from person where id IN (1, 'two', 3)"),
@@ -784,7 +787,7 @@ mod tests {
 
     #[test]
     fn select_where_invalid_type_is_true() {
-        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        let mut sim = Simulator::new(GenericDialect {});
         sim.execute("create table person (id int)").unwrap();
         assert_eq!(
             sim.execute("select * from person where id IS TRUE"),
@@ -797,7 +800,7 @@ mod tests {
 
     #[test]
     fn select_where_type_mismatch_expr() {
-        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        let mut sim = Simulator::new(GenericDialect {});
         sim.execute("create table person (id int)").unwrap();
         assert_eq!(
             sim.execute("select * from person where 10 + 20"),
@@ -810,7 +813,7 @@ mod tests {
 
     #[test]
     fn select_join_basic() {
-        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        let mut sim = Simulator::new(GenericDialect {});
         sim.execute("create table person (id int primary key, name text)")
             .unwrap();
         sim.execute(
@@ -824,7 +827,7 @@ mod tests {
 
     #[test]
     fn select_join_on_type_mismatch() {
-        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        let mut sim = Simulator::new(GenericDialect {});
         sim.execute("create table person (id int primary key, name text)")
             .unwrap();
         sim.execute(
@@ -843,7 +846,7 @@ mod tests {
 
     #[test]
     fn select_join_on_type_mismatch_on() {
-        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        let mut sim = Simulator::new(GenericDialect {});
         sim.execute("create table person (id int primary key, name text)")
             .unwrap();
         sim.execute(
@@ -862,7 +865,7 @@ mod tests {
 
     #[test]
     fn select_join_chain_basic() {
-        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        let mut sim = Simulator::new(GenericDialect {});
         sim.execute("create table users (id int primary key, name text)")
             .unwrap();
         sim.execute("create table orders (id int primary key, user_id int, product_id int)")
@@ -881,7 +884,7 @@ mod tests {
 
     #[test]
     fn select_join_chain_ambiguous() {
-        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        let mut sim = Simulator::new(GenericDialect {});
         sim.execute("create table users (id int primary key, name text)")
             .unwrap();
         sim.execute("create table orders (id int primary key, user_id int)")
@@ -901,7 +904,7 @@ mod tests {
 
     #[test]
     fn select_join_chain_wildcard() {
-        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        let mut sim = Simulator::new(GenericDialect {});
         sim.execute("create table users (id int primary key, name text)")
             .unwrap();
         sim.execute("create table orders (id int primary key, user_id int, product_id int)")
@@ -919,7 +922,7 @@ mod tests {
 
     #[test]
     fn select_join_chain_table_out_of_scope() {
-        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        let mut sim = Simulator::new(GenericDialect {});
         sim.execute("create table users (id int primary key, name text)")
             .unwrap();
         sim.execute("create table orders (id int primary key, user_id int, product_id int)")
@@ -939,7 +942,7 @@ mod tests {
 
     #[test]
     fn select_join_chain_table_doesnt_exist() {
-        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        let mut sim = Simulator::new(GenericDialect {});
         sim.execute("create table users (id int primary key, name text)")
             .unwrap();
         sim.execute("create table orders (id int primary key, user_id int)")
@@ -956,7 +959,7 @@ mod tests {
 
     #[test]
     fn select_join_ambiguous_column() {
-        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        let mut sim = Simulator::new(GenericDialect {});
         sim.execute("create table person (id int primary key, name text)")
             .unwrap();
         sim.execute(
@@ -972,7 +975,7 @@ mod tests {
 
     #[test]
     fn select_join_natural() {
-        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        let mut sim = Simulator::new(GenericDialect {});
         sim.execute("create table person (id int primary key, cart_id int, name text)")
             .unwrap();
         sim.execute(
@@ -986,7 +989,7 @@ mod tests {
 
     #[test]
     fn select_join_natural_no_common_column() {
-        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        let mut sim = Simulator::new(GenericDialect {});
         sim.execute("create table person (id int primary key, name text)")
             .unwrap();
         sim.execute(
@@ -1002,7 +1005,7 @@ mod tests {
 
     #[test]
     fn select_join_natural_single_common_column() {
-        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        let mut sim = Simulator::new(GenericDialect {});
         sim.execute("create table person (id int primary key, name text)")
             .unwrap();
         sim.execute("create table order (id int primary key, total float)")
@@ -1014,7 +1017,7 @@ mod tests {
 
     #[test]
     fn select_join_natural_multiple_common_columns() {
-        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        let mut sim = Simulator::new(GenericDialect {});
         sim.execute("create table person (id int primary key, dept_id int, name text)")
             .unwrap();
         sim.execute("create table employee (id int, dept_id int, salary float)")
@@ -1026,7 +1029,7 @@ mod tests {
 
     #[test]
     fn select_join_natural_common_column_not_ambiguous() {
-        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        let mut sim = Simulator::new(GenericDialect {});
         sim.execute("create table person (id int primary key, name text)")
             .unwrap();
         sim.execute("create table order (id int primary key, total float)")
@@ -1038,7 +1041,7 @@ mod tests {
 
     #[test]
     fn select_join_natural_qualified_common_column() {
-        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        let mut sim = Simulator::new(GenericDialect {});
         sim.execute("create table person (id int primary key, name text)")
             .unwrap();
         sim.execute("create table order (id int primary key, total float)")
@@ -1058,7 +1061,7 @@ mod tests {
 
     #[test]
     fn select_join_natural_type_mismatch() {
-        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        let mut sim = Simulator::new(GenericDialect {});
         sim.execute("create table person (id int primary key, name text)")
             .unwrap();
         sim.execute("create table order (id text primary key, total float)")
@@ -1075,7 +1078,7 @@ mod tests {
 
     #[test]
     fn select_join_natural_mixed_common_and_unique() {
-        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        let mut sim = Simulator::new(GenericDialect {});
         sim.execute("create table users (user_id int, dept_id int, name text)")
             .unwrap();
         sim.execute("create table departments (dept_id int, manager_id int, dept_name text)")
@@ -1093,7 +1096,7 @@ mod tests {
 
     #[test]
     fn select_join_natural_chain() {
-        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        let mut sim = Simulator::new(GenericDialect {});
         sim.execute("create table a (id int, x int)").unwrap();
         sim.execute("create table b (id int, y int)").unwrap();
         sim.execute("create table c (id int, z int)").unwrap();
@@ -1107,7 +1110,7 @@ mod tests {
 
     #[test]
     fn select_join_natural_chain_non_existing_column() {
-        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        let mut sim = Simulator::new(GenericDialect {});
         sim.execute("create table a (id int, x int)").unwrap();
         sim.execute("create table b (id int, y int)").unwrap();
         sim.execute("create table c (id int, z int)").unwrap();
@@ -1120,7 +1123,7 @@ mod tests {
 
     #[test]
     fn select_join_natural_chain_non_existing_table() {
-        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        let mut sim = Simulator::new(GenericDialect {});
         sim.execute("create table a (id int, x int)").unwrap();
         sim.execute("create table b (id int, y int)").unwrap();
         sim.execute("create table c (id int, z int)").unwrap();
@@ -1133,7 +1136,7 @@ mod tests {
 
     #[test]
     fn select_join_none_basic() {
-        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        let mut sim = Simulator::new(GenericDialect {});
         sim.execute("create table colors (color_id int, name text)")
             .unwrap();
         sim.execute("create table sizes (size_id int, size_name text)")
@@ -1144,7 +1147,7 @@ mod tests {
 
     #[test]
     fn select_join_none_with_ambiguous_wildcard() {
-        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        let mut sim = Simulator::new(GenericDialect {});
         sim.execute("create table table1 (id int, name text)")
             .unwrap();
         sim.execute("create table table2 (id int, value text)")
@@ -1158,7 +1161,7 @@ mod tests {
 
     #[test]
     fn select_join_none_with_comma_syntax() {
-        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        let mut sim = Simulator::new(GenericDialect {});
         sim.execute("create table a (x int)").unwrap();
         sim.execute("create table b (y int)").unwrap();
 
@@ -1167,7 +1170,7 @@ mod tests {
 
     #[test]
     fn select_join_none_specific_columns() {
-        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        let mut sim = Simulator::new(GenericDialect {});
         sim.execute("create table products (product_id int, name text)")
             .unwrap();
         sim.execute("create table categories (category_id int, category text)")
@@ -1179,7 +1182,7 @@ mod tests {
 
     #[test]
     fn select_join_none_qualified_columns() {
-        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        let mut sim = Simulator::new(GenericDialect {});
         sim.execute("create table person (id int, name text)")
             .unwrap();
         sim.execute("create table company (id int, company_name text)")
@@ -1191,7 +1194,7 @@ mod tests {
 
     #[test]
     fn select_join_none_ambiguous_column() {
-        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        let mut sim = Simulator::new(GenericDialect {});
         sim.execute("create table left_table (id int, value text)")
             .unwrap();
         sim.execute("create table right_table (id int, score int)")
@@ -1205,7 +1208,7 @@ mod tests {
 
     #[test]
     fn select_join_none_with_aliases() {
-        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        let mut sim = Simulator::new(GenericDialect {});
         sim.execute("create table users (user_id int, name text)")
             .unwrap();
         sim.execute("create table roles (role_id int, role_name text)")
@@ -1217,7 +1220,7 @@ mod tests {
 
     #[test]
     fn select_join_none_with_where_clause() {
-        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        let mut sim = Simulator::new(GenericDialect {});
         sim.execute("create table numbers (n int)").unwrap();
         sim.execute("create table multipliers (m int)").unwrap();
 
@@ -1229,7 +1232,7 @@ mod tests {
     // // As it considers this to be a nested join.
     // #[test]
     // fn select_join_none_multiple_tables() {
-    //     let mut sim = Simulator::new(Box::new(GenericDialect {}));
+    //     let mut sim = Simulator::new(GenericDialect {});
     //     sim.execute("create table a (x int)").unwrap();
     //     sim.execute("create table b (y int)").unwrap();
     //     sim.execute("create table c (z int)").unwrap();
@@ -1239,7 +1242,7 @@ mod tests {
 
     #[test]
     fn select_join_none_empty_tables() {
-        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        let mut sim = Simulator::new(GenericDialect {});
         sim.execute("create table empty1 (id int)").unwrap();
         sim.execute("create table empty2 (value text)").unwrap();
 
@@ -1249,7 +1252,7 @@ mod tests {
 
     #[test]
     fn select_join_none_wildcard_expansion() {
-        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        let mut sim = Simulator::new(GenericDialect {});
         sim.execute("create table team (team_id int, team_name text)")
             .unwrap();
         sim.execute("create table player (player_id int, player_name text)")
@@ -1265,7 +1268,7 @@ mod tests {
 
     #[test]
     fn select_inner_join_vs_join_none() {
-        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        let mut sim = Simulator::new(GenericDialect {});
         sim.execute("create table table1 (a int)").unwrap();
         sim.execute("create table table2 (b int)").unwrap();
 
@@ -1276,7 +1279,7 @@ mod tests {
 
     #[test]
     fn select_cross_join() {
-        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        let mut sim = Simulator::new(GenericDialect {});
         sim.execute("create table empty1 (id int)").unwrap();
         sim.execute("create table empty2 (value text)").unwrap();
 
@@ -1287,7 +1290,7 @@ mod tests {
 
     #[test]
     fn select_join_using() {
-        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        let mut sim = Simulator::new(GenericDialect {});
         sim.execute("create table table1 (id int primary key, fruit text not null)")
             .unwrap();
         sim.execute("create table table2 (id int primary key, juice text not null)")
@@ -1302,7 +1305,7 @@ mod tests {
 
     #[test]
     fn select_join_using_column_doesnt_exist() {
-        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        let mut sim = Simulator::new(GenericDialect {});
         sim.execute("create table table1 (id int primary key, fruit text not null)")
             .unwrap();
         sim.execute("create table table2 (id2 int primary key, juice text not null)")
@@ -1316,7 +1319,7 @@ mod tests {
 
     #[test]
     fn select_join_using_ambiguous_column() {
-        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        let mut sim = Simulator::new(GenericDialect {});
         sim.execute("create table table1 (id int primary key, fruit text not null, price int)")
             .unwrap();
         sim.execute(
@@ -1332,7 +1335,7 @@ mod tests {
 
     #[test]
     fn select_join_using_type_mismatch() {
-        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        let mut sim = Simulator::new(GenericDialect {});
         sim.execute("create table table1 (id int primary key, fruit int not null, price int)")
             .unwrap();
         sim.execute(
@@ -1351,7 +1354,7 @@ mod tests {
 
     #[test]
     fn select_join_using_multi_column() {
-        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        let mut sim = Simulator::new(GenericDialect {});
         sim.execute("create table table1 (id int primary key, fruit text not null, price int)")
             .unwrap();
         sim.execute(
@@ -1365,7 +1368,7 @@ mod tests {
 
     #[test]
     fn select_left_join_basic() {
-        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        let mut sim = Simulator::new(GenericDialect {});
         sim.execute("create table person (id int primary key, name text)")
             .unwrap();
         sim.execute(
@@ -1379,7 +1382,7 @@ mod tests {
 
     #[test]
     fn select_left_outer_join_basic() {
-        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        let mut sim = Simulator::new(GenericDialect {});
         sim.execute("create table users (id int primary key, name text)")
             .unwrap();
         sim.execute("create table orders (id int primary key, user_id int, total float)")
@@ -1391,7 +1394,7 @@ mod tests {
 
     #[test]
     fn select_left_join_using() {
-        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        let mut sim = Simulator::new(GenericDialect {});
         sim.execute("create table table1 (id int primary key, name text)")
             .unwrap();
         sim.execute("create table table2 (id int primary key, value int)")
@@ -1403,7 +1406,7 @@ mod tests {
 
     #[test]
     fn select_right_join_basic() {
-        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        let mut sim = Simulator::new(GenericDialect {});
         sim.execute("create table person (id int primary key, name text)")
             .unwrap();
         sim.execute(
@@ -1417,7 +1420,7 @@ mod tests {
 
     #[test]
     fn select_right_outer_join_basic() {
-        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        let mut sim = Simulator::new(GenericDialect {});
         sim.execute("create table employees (id int primary key, name text)")
             .unwrap();
         sim.execute("create table departments (id int primary key, emp_id int, dept_name text)")
@@ -1429,7 +1432,7 @@ mod tests {
 
     #[test]
     fn select_right_join_natural() {
-        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        let mut sim = Simulator::new(GenericDialect {});
         sim.execute("create table products (id int primary key, name text)")
             .unwrap();
         sim.execute("create table inventory (id int primary key, quantity int)")
@@ -1441,7 +1444,7 @@ mod tests {
 
     #[test]
     fn select_full_outer_join_basic() {
-        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        let mut sim = Simulator::new(GenericDialect {});
         sim.execute("create table customers (id int primary key, name text)")
             .unwrap();
         sim.execute("create table orders (id int primary key, customer_id int, amount float)")
@@ -1453,7 +1456,7 @@ mod tests {
 
     #[test]
     fn select_full_outer_join_using() {
-        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        let mut sim = Simulator::new(GenericDialect {});
         sim.execute("create table left_table (shared_id int, left_data text)")
             .unwrap();
         sim.execute("create table right_table (shared_id int, right_data text)")
@@ -1465,7 +1468,7 @@ mod tests {
 
     #[test]
     fn select_outer_join_type_mismatch() {
-        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        let mut sim = Simulator::new(GenericDialect {});
         sim.execute("create table table1 (id int primary key, name text)")
             .unwrap();
         sim.execute("create table table2 (id int primary key, value text)")

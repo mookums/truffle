@@ -1,10 +1,13 @@
-use sqlparser::ast::{Delete, FromTable, TableFactor};
+use sqlparser::{
+    ast::{Delete, FromTable, TableFactor},
+    dialect::Dialect,
+};
 
 use crate::{Error, Simulator, object_name_to_strings, ty::SqlType};
 
 use super::join::JoinInferrer;
 
-impl Simulator {
+impl<D: Dialect> Simulator<D> {
     pub(crate) fn delete(&self, delete: Delete) -> Result<(), Error> {
         // TODO: Support multi table deletes (for MySQL)
 
@@ -74,7 +77,7 @@ mod tests {
 
     #[test]
     fn delete_row_by_field() {
-        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        let mut sim = Simulator::new(GenericDialect {});
         sim.execute("create table person (id int primary key, name text)")
             .unwrap();
         sim.execute("delete from person where id = ?").unwrap();
@@ -83,7 +86,7 @@ mod tests {
 
     #[test]
     fn delete_row_column_doesnt_exist() {
-        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        let mut sim = Simulator::new(GenericDialect {});
         sim.execute("create table person (id int primary key, name text)")
             .unwrap();
 
@@ -95,7 +98,7 @@ mod tests {
 
     #[test]
     fn delete_row_table_doesnt_exist() {
-        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        let mut sim = Simulator::new(GenericDialect {});
 
         assert_eq!(
             sim.execute("delete from person where weight = ?"),
@@ -105,7 +108,7 @@ mod tests {
 
     #[test]
     fn delete_row_join() {
-        let mut sim = Simulator::new(Box::new(GenericDialect {}));
+        let mut sim = Simulator::new(GenericDialect {});
         sim.execute("create table person (id int primary key, name text)")
             .unwrap();
         sim.execute(
