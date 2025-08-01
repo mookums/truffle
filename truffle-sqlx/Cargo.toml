@@ -9,4 +9,4 @@ proc-macro = true
 [dependencies]
 truffle-sim = { path = "../truffle-sim" }
 quote = "1.0.40"
-syn = "2.0.104"
+syn = { version = "2.0.104", features = ["extra-traits"] }

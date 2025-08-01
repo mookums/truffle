@@ -1,11 +1,15 @@
-use proc_macro::TokenStream;
+use proc_macro::{Span, TokenStream};
 use quote::quote;
 use std::{
     fs,
     path::{Path, PathBuf},
     sync::LazyLock,
 };
-use syn::{Error, LitStr, parse_macro_input};
+use syn::{
+    Error, LitStr, Token,
+    parse::{Parse, discouraged::Speculative},
+    parse_macro_input,
+};
 use truffle_sim::{Dialect, Simulator};
 
 static MIGRATIONS: LazyLock<Result<Vec<(PathBuf, String)>, String>> =
@@ -68,17 +72,23 @@ fn load_migrations() -> Result<Vec<(PathBuf, String)>, String> {
     Ok(migration_contents)
 }
 
-fn apply_migrations<D: Dialect>(sql_lit: &LitStr, sim: &mut Simulator<D>) -> Option<TokenStream> {
+fn apply_migrations<D: Dialect>(sim: &mut Simulator<D>) -> Option<TokenStream> {
     let migrations = match MIGRATIONS.as_ref() {
         Ok(migrations) => migrations,
-        Err(e) => return Some(Error::new(sql_lit.span(), e).to_compile_error().into()),
+        Err(e) => {
+            return Some(
+                Error::new(Span::call_site().into(), e)
+                    .to_compile_error()
+                    .into(),
+            );
+        }
     };
 
     for migration_pair in migrations {
         if let Err(e) = sim.execute(&migration_pair.1) {
             return Some(
                 Error::new(
-                    sql_lit.span(),
+                    Span::call_site().into(),
                     format!("Migration {:#?}: {}", migration_pair.0, e),
                 )
                 .to_compile_error()
@@ -100,13 +110,13 @@ pub fn query(input: TokenStream) -> TokenStream {
     use truffle_sim::{GenericDialect, Simulator};
     let mut sim = Simulator::new(GenericDialect {});
 
-    if let Some(e) = apply_migrations(&sql_lit, &mut sim) {
+    if let Some(e) = apply_migrations(&mut sim) {
         return e;
     }
 
     // Run your SQL.
     if let Err(e) = sim.execute(&sql) {
-        return Error::new(sql_lit.span(), format!("{e}"))
+        return Error::new(sql_lit.span(), e.to_string())
             .to_compile_error()
             .into();
     }
@@ -116,52 +126,91 @@ pub fn query(input: TokenStream) -> TokenStream {
     })
 }
 
+struct QueryInput {
+    sql_lit: syn::LitStr,
+    ty: Option<syn::Type>,
+}
+
+impl Parse for QueryInput {
+    fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
+        let fork = input.fork();
+
+        if let Ok(ty) = fork.parse::<syn::Type>() {
+            if fork.parse::<Token![,]>().is_ok() {
+                if let Ok(sql_lit) = fork.parse::<syn::LitStr>() {
+                    input.advance_to(&fork);
+                    return Ok(QueryInput {
+                        sql_lit,
+                        ty: Some(ty),
+                    });
+                }
+            }
+        }
+
+        let sql_lit: LitStr = input.parse()?;
+        Ok(QueryInput { sql_lit, ty: None })
+    }
+}
+
+/// Validates the syntax and semantics of your SQL at compile time.
+///
+///
 #[proc_macro]
 pub fn query_as(input: TokenStream) -> TokenStream {
-    let sql_lit = parse_macro_input!(input as LitStr);
-    let sql = sql_lit.value();
+    let parsed = syn::parse_macro_input!(input as QueryInput);
 
     // Operate on the root of this Crate.
     use truffle_sim::{GenericDialect, Simulator};
     let mut sim = Simulator::new(GenericDialect {});
 
-    if let Some(e) = apply_migrations(&sql_lit, &mut sim) {
+    if let Some(e) = apply_migrations(&mut sim) {
         return e;
     }
 
-    // Run your SQL.
+    let sql = parsed.sql_lit.value();
     if let Err(e) = sim.execute(&sql) {
-        return Error::new(sql_lit.span(), format!("{e}"))
+        return Error::new(parsed.sql_lit.span(), e.to_string())
             .to_compile_error()
             .into();
     }
 
-    TokenStream::from(quote! {
-        sqlx::query_as(#sql)
-    })
+    // Run your SQL.
+    match parsed.ty {
+        Some(ty) => TokenStream::from(quote! {
+            sqlx::query_as::<_, #ty>(#sql)
+        }),
+        None => TokenStream::from(quote! {
+            sqlx::query_as(#sql)
+        }),
+    }
 }
 
 #[proc_macro]
 pub fn query_scalar(input: TokenStream) -> TokenStream {
-    let sql_lit = parse_macro_input!(input as LitStr);
-    let sql = sql_lit.value();
+    let parsed = syn::parse_macro_input!(input as QueryInput);
 
     // Operate on the root of this Crate.
     use truffle_sim::{GenericDialect, Simulator};
     let mut sim = Simulator::new(GenericDialect {});
 
-    if let Some(e) = apply_migrations(&sql_lit, &mut sim) {
+    if let Some(e) = apply_migrations(&mut sim) {
         return e;
     }
 
-    // Run your SQL.
+    let sql = parsed.sql_lit.value();
     if let Err(e) = sim.execute(&sql) {
-        return Error::new(sql_lit.span(), format!("{e}"))
+        return Error::new(parsed.sql_lit.span(), e.to_string())
             .to_compile_error()
             .into();
     }
 
-    TokenStream::from(quote! {
-        sqlx::query_scalar(#sql)
-    })
+    // Run your SQL.
+    match parsed.ty {
+        Some(ty) => TokenStream::from(quote! {
+            sqlx::query_scalar::<_, #ty>(#sql)
+        }),
+        None => TokenStream::from(quote! {
+            sqlx::query_scalar(#sql)
+        }),
+    }
 }
