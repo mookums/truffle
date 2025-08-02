@@ -1,12 +1,9 @@
-use sqlparser::{
-    ast::{ObjectName, ObjectType},
-    dialect::Dialect,
-};
+use sqlparser::ast::{ObjectName, ObjectType};
 use tracing::{debug, warn};
 
 use crate::{Error, Simulator, object_name_to_strings, table::Constraint};
 
-impl<D: Dialect> Simulator<D> {
+impl Simulator {
     pub(crate) fn drop(
         &mut self,
         object_type: &ObjectType,

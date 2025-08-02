@@ -1,19 +1,16 @@
-use sqlparser::{
-    ast::{ColumnOption, CreateTable, ReferentialAction, TableConstraint},
-    dialect::Dialect,
-};
+use sqlparser::ast::{ColumnOption, CreateTable, ReferentialAction, TableConstraint};
 use tracing::debug;
 
 use crate::{
     Error, Simulator,
     column::Column,
-    expr::ColumnInferrer,
+    expr::{ColumnInferrer, InferType},
     object_name_to_strings,
     table::{Constraint, Table},
     ty::SqlType,
 };
 
-impl<D: Dialect> Simulator<D> {
+impl Simulator {
     pub(crate) fn create_table(&mut self, create_table: CreateTable) -> Result<(), Error> {
         let name = object_name_to_strings(&create_table.name).pop().unwrap();
 
@@ -40,14 +37,14 @@ impl<D: Dialect> Simulator<D> {
                     }
                     ColumnOption::Default(expr) => {
                         let inferrer = CreateTableInferrer::default();
-                        let default_ty =
-                            self.infer_expr_type(&expr, Some(ty.clone()), &inferrer)?;
-                        if ty != default_ty {
-                            return Err(Error::TypeMismatch {
-                                expected: ty,
-                                got: default_ty,
-                            });
-                        }
+                        assert_eq!(
+                            self.infer_expr_type(
+                                &expr,
+                                InferType::Required(ty.clone()),
+                                &inferrer
+                            )?,
+                            ty
+                        );
 
                         default = true;
                     }
@@ -285,21 +282,16 @@ impl<D: Dialect> Simulator<D> {
 #[derive(Default)]
 struct CreateTableInferrer {}
 
-impl<D: Dialect> ColumnInferrer<D> for CreateTableInferrer {
+impl ColumnInferrer for CreateTableInferrer {
     fn infer_unqualified_type(
         &self,
-        _: &Simulator<D>,
+        _: &Simulator,
         column: &str,
     ) -> Result<Option<SqlType>, Error> {
         Err(Error::InvalidDefault(column.to_string()))
     }
 
-    fn infer_qualified_type(
-        &self,
-        _: &Simulator<D>,
-        _: &str,
-        column: &str,
-    ) -> Result<SqlType, Error> {
+    fn infer_qualified_type(&self, _: &Simulator, _: &str, column: &str) -> Result<SqlType, Error> {
         Err(Error::InvalidDefault(column.to_string()))
     }
 }

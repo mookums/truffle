@@ -1,11 +1,12 @@
-use sqlparser::{
-    ast::{Insert, SetExpr, TableObject},
-    dialect::Dialect,
+use sqlparser::ast::{Insert, SetExpr, TableObject};
+
+use crate::{
+    Error, Simulator,
+    expr::{ColumnInferrer, InferType},
+    object_name_to_strings,
 };
 
-use crate::{Error, Simulator, expr::ColumnInferrer, object_name_to_strings};
-
-impl<D: Dialect> Simulator<D> {
+impl Simulator {
     pub(crate) fn insert(&self, ins: Insert) -> Result<(), Error> {
         let TableObject::TableName(table_object_name) = ins.table else {
             todo!();
@@ -55,30 +56,22 @@ impl<D: Dialect> Simulator<D> {
                         if provided_columns.is_empty() {
                             // Implicit (Table Index) Columns.
                             let expr = &row[i];
-                            let ty =
-                                self.infer_expr_type(expr, Some(column.ty.clone()), &inferrer)?;
-
-                            if column.ty != ty {
-                                return Err(Error::TypeMismatch {
-                                    expected: column.ty.clone(),
-                                    got: ty,
-                                });
-                            }
+                            _ = self.infer_expr_type(
+                                expr,
+                                InferType::Required(column.ty.clone()),
+                                &inferrer,
+                            )?;
                         } else if let Some(index) =
                             provided_columns.iter().position(|pc| pc == column_name)
                         {
                             // If the column was named explicitly...
                             let expr = &row[index];
 
-                            let ty =
-                                self.infer_expr_type(expr, Some(column.ty.clone()), &inferrer)?;
-
-                            if column.ty != ty {
-                                return Err(Error::TypeMismatch {
-                                    expected: column.ty.clone(),
-                                    got: ty,
-                                });
-                            }
+                            _ = self.infer_expr_type(
+                                expr,
+                                InferType::Required(column.ty.clone()),
+                                &inferrer,
+                            )?;
                         } else if !(column.nullable || column.default) {
                             // If the column was not named explicitly, we check it.
                             return Err(Error::RequiredColumnMissing(column_name.to_string()));
@@ -96,10 +89,10 @@ impl<D: Dialect> Simulator<D> {
 #[derive(Default)]
 struct InsertInferrer {}
 
-impl<D: Dialect> ColumnInferrer<D> for InsertInferrer {
+impl ColumnInferrer for InsertInferrer {
     fn infer_unqualified_type(
         &self,
-        _: &Simulator<D>,
+        _: &Simulator,
         _: &str,
     ) -> Result<Option<crate::ty::SqlType>, Error> {
         Err(Error::Unsupported(
@@ -109,7 +102,7 @@ impl<D: Dialect> ColumnInferrer<D> for InsertInferrer {
 
     fn infer_qualified_type(
         &self,
-        _: &Simulator<D>,
+        _: &Simulator,
         _: &str,
         _: &str,
     ) -> Result<crate::ty::SqlType, Error> {

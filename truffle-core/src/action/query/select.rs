@@ -9,12 +9,12 @@ use sqlparser::{
 use crate::{
     Error, Simulator,
     action::join::{JoinContext, JoinInferrer},
-    expr::ColumnInferrer,
+    expr::{ColumnInferrer, InferType},
     object_name_to_strings,
     ty::SqlType,
 };
 
-impl<D: Dialect> Simulator<D> {
+impl Simulator {
     pub(crate) fn select(&self, sel: &Select) -> Result<(), Error> {
         let mut columns = SelectColumns::List(vec![]);
         let mut contexts = vec![];
@@ -201,13 +201,7 @@ impl<D: Dialect> Simulator<D> {
 
         // Validate WHERE clause.
         if let Some(selection) = &sel.selection {
-            let ty = self.infer_expr_type(selection, Some(SqlType::Boolean), &inferrer)?;
-            if ty != SqlType::Boolean {
-                return Err(Error::TypeMismatch {
-                    expected: SqlType::Boolean,
-                    got: ty,
-                });
-            }
+            self.infer_expr_type(selection, InferType::Required(SqlType::Boolean), &inferrer)?;
         }
 
         Ok(())
@@ -662,8 +656,8 @@ mod tests {
         assert_eq!(
             sim.execute("select name from person p where (p.id, p.name) = (false, 200)"),
             Err(Error::TypeMismatch {
-                expected: SqlType::Tuple(vec![SqlType::Integer, SqlType::Text]),
-                got: SqlType::Tuple(vec![SqlType::Boolean, SqlType::SmallInt])
+                expected: SqlType::Integer,
+                got: SqlType::Boolean,
             })
         );
     }

@@ -3,7 +3,7 @@ use std::{fs::read_to_string, path::Path};
 use clap::Parser;
 use rustyline::{DefaultEditor, error::ReadlineError};
 use tracing::{error, info};
-use truffle_sim::{Dialect, GenericDialect, Simulator};
+use truffle::{GenericDialect, Simulator};
 
 #[derive(clap::Parser)]
 #[command(version)]
@@ -37,7 +37,7 @@ fn main() {
             }
         }
         Commands::Repl => {
-            fn execute_sql<D: Dialect>(sim: &mut Simulator<D>, sql: &str) {
+            fn execute_sql(sim: &mut Simulator, sql: &str) {
                 match sim.execute(sql) {
                     Ok(_) => {
                         println!("✅ ok");

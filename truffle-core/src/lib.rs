@@ -1,9 +1,13 @@
 mod action;
 mod column;
+pub mod config;
 mod expr;
+mod immutable;
 mod table;
 mod ty;
 
+use config::{Config, DialectKind};
+use immutable::Immutable;
 pub use sqlparser::dialect::*;
 use sqlparser::{
     ast::{ObjectName, Statement},
@@ -11,7 +15,7 @@ use sqlparser::{
 };
 use ty::SqlType;
 
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Arc};
 use table::Table;
 
 #[derive(Debug, PartialEq, Eq, thiserror::Error)]
@@ -58,9 +62,9 @@ pub enum Error {
     Unsupported(String),
 }
 
-#[derive(Debug)]
-pub struct Simulator<D: Dialect> {
-    dialect: D,
+#[derive(Debug, Clone)]
+pub struct Simulator {
+    dialect: Immutable<Arc<dyn Dialect>>,
     tables: HashMap<String, Table>,
 }
 
@@ -71,12 +75,22 @@ fn object_name_to_strings(name: &ObjectName) -> Vec<String> {
         .collect()
 }
 
-impl<D: Dialect> Simulator<D> {
+impl Simulator {
     /// Construct a new Simulator with the given SQL Dialect.
-    pub fn new(dialect: D) -> Self {
+    pub fn new<D: Dialect>(dialect: D) -> Self {
         Self {
-            dialect,
+            dialect: Immutable::new(Arc::new(dialect)),
             tables: HashMap::new(),
+        }
+    }
+
+    /// Construct a new Simulator using the given Config.
+    pub fn with_config(config: &Config) -> Self {
+        match config.dialect {
+            DialectKind::Generic => Simulator::new(GenericDialect {}),
+            DialectKind::Ansi => Simulator::new(AnsiDialect {}),
+            DialectKind::Sqlite => Simulator::new(SQLiteDialect {}),
+            DialectKind::Postgres => Simulator::new(PostgreSqlDialect {}),
         }
     }
 
@@ -95,7 +109,7 @@ impl<D: Dialect> Simulator<D> {
 
     /// Executes the given SQL in the Simulator and updates the state.
     pub fn execute(&mut self, sql: impl AsRef<str>) -> Result<(), Error> {
-        let parser = Parser::new(&self.dialect);
+        let parser = Parser::new(&**self.dialect);
         let statements = parser.try_with_sql(sql.as_ref())?.parse_statements()?;
 
         for statement in statements {

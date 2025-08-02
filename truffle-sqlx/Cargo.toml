@@ -7,6 +7,7 @@ edition = "2024"
 proc-macro = true
 
 [dependencies]
-truffle-sim = { path = "../truffle-sim" }
+truffle = { path = "../truffle-core" }
+truffle-loader = { path = "../truffle-loader" }
 quote = "1.0.40"
 syn = { version = "2.0.104", features = ["extra-traits"] }

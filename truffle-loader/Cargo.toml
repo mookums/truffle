@@ -1,0 +1,9 @@
+[package]
+name = "truffle-loader"
+edition = "2024"
+version.workspace = true
+
+[dependencies]
+serde.workspace = true
+toml = "0.9.4"
+truffle = { path = "../truffle-core" }

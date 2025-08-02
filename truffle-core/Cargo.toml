@@ -1,10 +1,12 @@
 [package]
-name = "truffle-sim"
-version = "0.1.0"
+name = "truffle"
+version.workspace = true
 edition = "2024"
 
 [features]
 default = []
+
+# Enables Serde
 serde = ["indexmap/serde", "sqlparser/serde"]
 
 [dependencies]

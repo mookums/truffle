@@ -1,17 +1,18 @@
 use std::collections::HashMap;
 
 use itertools::Itertools;
-use sqlparser::{
-    ast::{Join, JoinConstraint, JoinOperator, TableFactor},
-    dialect::Dialect,
-};
+use sqlparser::ast::{Join, JoinConstraint, JoinOperator, TableFactor};
 
 use crate::{
-    Error, Simulator, column::Column, expr::ColumnInferrer, object_name_to_strings, table::Table,
+    Error, Simulator,
+    column::Column,
+    expr::{ColumnInferrer, InferType},
+    object_name_to_strings,
+    table::Table,
     ty::SqlType,
 };
 
-impl<D: Dialect> Simulator<D> {
+impl Simulator {
     pub(crate) fn infer_joins(
         &self,
         table: &Table,
@@ -73,7 +74,7 @@ impl<D: Dialect> Simulator<D> {
                             &right_table_name,
                             right_table_alias.as_ref(),
                         )?,
-                        JoinOperator::CrossJoin => join_ctx.join_table::<D>(
+                        JoinOperator::CrossJoin => join_ctx.join_table(
                             right_table,
                             right_table_name,
                             right_table_alias,
@@ -114,7 +115,8 @@ impl<D: Dialect> Simulator<D> {
                     right_table: (right_table_name, right_table),
                 };
 
-                let ty = self.infer_expr_type(expr, Some(SqlType::Boolean), &inferrer)?;
+                let ty =
+                    self.infer_expr_type(expr, InferType::Required(SqlType::Boolean), &inferrer)?;
 
                 if ty != SqlType::Boolean {
                     return Err(Error::TypeMismatch {
@@ -123,7 +125,7 @@ impl<D: Dialect> Simulator<D> {
                     });
                 }
 
-                join_ctx.join_table::<D>(
+                join_ctx.join_table(
                     right_table,
                     right_table_name,
                     right_table_alias,
@@ -176,7 +178,7 @@ impl<D: Dialect> Simulator<D> {
                     }
                 }
 
-                join_ctx.join_table::<D>(
+                join_ctx.join_table(
                     right_table,
                     right_table_name,
                     right_table_alias,
@@ -214,7 +216,7 @@ impl<D: Dialect> Simulator<D> {
                     return Err(Error::NoCommonColumn);
                 }
 
-                join_ctx.join_table::<D>(
+                join_ctx.join_table(
                     right_table,
                     right_table_name,
                     right_table_alias,
@@ -222,7 +224,7 @@ impl<D: Dialect> Simulator<D> {
                 )?;
             }
             JoinConstraint::None => {
-                join_ctx.join_table::<D>(
+                join_ctx.join_table(
                     right_table,
                     right_table_name,
                     right_table_alias,
@@ -297,7 +299,7 @@ impl JoinContext {
         })
     }
 
-    fn join_table<D: Dialect>(
+    fn join_table(
         &mut self,
         table: &Table,
         name: impl ToString,
@@ -411,15 +413,12 @@ impl JoinContext {
         self.refs.keys().map(|k| &k.name).any(|n| n == column)
     }
 
-    fn infer_unqualified_type<D: Dialect>(
+    fn infer_unqualified_type(
         &self,
-        sim: &Simulator<D>,
+        sim: &Simulator,
         column: &str,
     ) -> Result<Option<SqlType>, Error> {
-        fn unwrap_match<G: Dialect>(
-            sim: &Simulator<G>,
-            matches: &[(ColumnRef, usize)],
-        ) -> Result<SqlType, Error> {
+        fn unwrap_match(sim: &Simulator, matches: &[(ColumnRef, usize)]) -> Result<SqlType, Error> {
             let m = matches.first().unwrap();
             let col_ref = &m.0;
             let ty = sim
@@ -456,9 +455,9 @@ impl JoinContext {
         }
     }
 
-    fn infer_qualified_type<D: Dialect>(
+    fn infer_qualified_type(
         &self,
-        sim: &Simulator<D>,
+        sim: &Simulator,
         qualifier: &str,
         column: &str,
         matched: &mut bool,
@@ -508,10 +507,10 @@ pub struct JoinInferrer<'a> {
     pub join_contexts: &'a [JoinContext],
 }
 
-impl<'a, D: Dialect> ColumnInferrer<D> for JoinInferrer<'a> {
+impl<'a> ColumnInferrer for JoinInferrer<'a> {
     fn infer_unqualified_type(
         &self,
-        sim: &Simulator<D>,
+        sim: &Simulator,
         column: &str,
     ) -> Result<Option<SqlType>, Error> {
         let mut found_ty: Option<SqlType> = None;
@@ -531,7 +530,7 @@ impl<'a, D: Dialect> ColumnInferrer<D> for JoinInferrer<'a> {
 
     fn infer_qualified_type(
         &self,
-        sim: &Simulator<D>,
+        sim: &Simulator,
         qualifier: &str,
         column: &str,
     ) -> Result<SqlType, Error> {
@@ -556,10 +555,10 @@ struct JoinContextInferrer<'a> {
     right_table: (&'a str, &'a Table),
 }
 
-impl<'a, D: Dialect> ColumnInferrer<D> for JoinContextInferrer<'a> {
+impl<'a> ColumnInferrer for JoinContextInferrer<'a> {
     fn infer_unqualified_type(
         &self,
-        sim: &Simulator<D>,
+        sim: &Simulator,
         column: &str,
     ) -> Result<Option<SqlType>, Error> {
         // Search Join Table.
@@ -579,7 +578,7 @@ impl<'a, D: Dialect> ColumnInferrer<D> for JoinContextInferrer<'a> {
 
     fn infer_qualified_type(
         &self,
-        sim: &Simulator<D>,
+        sim: &Simulator,
         qualifier: &str,
         column: &str,
     ) -> Result<SqlType, Error> {

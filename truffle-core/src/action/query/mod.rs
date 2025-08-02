@@ -1,14 +1,11 @@
 pub mod select;
 
-use sqlparser::{
-    ast::{Query, SetExpr},
-    dialect::Dialect,
-};
+use sqlparser::ast::{Query, SetExpr};
 use tracing::warn;
 
 use crate::{Error, Simulator};
 
-impl<D: Dialect> Simulator<D> {
+impl Simulator {
     pub(crate) fn query(&self, query: Box<Query>) -> Result<(), Error> {
         if let SetExpr::Select(select) = *query.body {
             self.select(&select)?;

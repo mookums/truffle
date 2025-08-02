@@ -1,8 +1,14 @@
 [workspace]
 resolver = "2"
 members = [
-    "truffle-cli", "truffle-sim", "truffle-sqlx",
+    "truffle-cli",
+    "truffle-core",
+    "truffle-loader",
+    "truffle-sqlx",
 ]
+
+[workspace.package]
+version = "0.1.0"
 
 [workspace.dependencies]
 serde = { version = "1.0.219", features = ["derive"] }

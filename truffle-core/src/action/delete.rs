@@ -1,13 +1,10 @@
-use sqlparser::{
-    ast::{Delete, FromTable, TableFactor},
-    dialect::Dialect,
-};
+use sqlparser::ast::{Delete, FromTable, TableFactor};
 
-use crate::{Error, Simulator, object_name_to_strings, ty::SqlType};
+use crate::{Error, Simulator, expr::InferType, object_name_to_strings, ty::SqlType};
 
 use super::join::JoinInferrer;
 
-impl<D: Dialect> Simulator<D> {
+impl Simulator {
     pub(crate) fn delete(&self, delete: Delete) -> Result<(), Error> {
         // TODO: Support multi table deletes (for MySQL)
 
@@ -57,7 +54,8 @@ impl<D: Dialect> Simulator<D> {
         };
 
         if let Some(selection) = delete.selection {
-            let ty = self.infer_expr_type(&selection, Some(SqlType::Boolean), &inferrer)?;
+            let ty =
+                self.infer_expr_type(&selection, InferType::Required(SqlType::Boolean), &inferrer)?;
 
             if ty != SqlType::Boolean {
                 return Err(Error::TypeMismatch {
