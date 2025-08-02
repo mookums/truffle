@@ -1,9 +1,80 @@
-use indexmap::IndexMap;
+use std::{
+    collections::{HashMap, hash_map},
+    slice,
+};
 
-use crate::column::Column;
+use crate::ty::SqlType;
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
+pub struct ResolveOutputKey {
+    pub qualifier: Option<String>,
+    pub name: String,
+}
+
+impl ResolveOutputKey {
+    pub fn new(qualifier: Option<String>, name: String) -> Self {
+        Self { qualifier, name }
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ResolvedQuery {
-    pub inputs: IndexMap<String, Column>,
-    // outputs: IndexMap<String, SqlType>,
+    pub inputs: Vec<SqlType>,
+    pub outputs: HashMap<ResolveOutputKey, SqlType>,
+}
+
+impl ResolvedQuery {
+    pub fn get_input(&self, index: usize) -> Option<&SqlType> {
+        self.inputs.get(index)
+    }
+
+    pub fn insert_input(&mut self, placeholder: impl AsRef<str>, sql_type: SqlType) {
+        if let Some(index) = parse_placeholder(placeholder) {
+            let true_index = (index - 1).min(self.inputs.len());
+            self.inputs.insert(true_index, sql_type);
+        } else {
+            self.inputs.push(sql_type);
+        }
+    }
+
+    pub fn insert_input_at(&mut self, index: usize, sql_type: SqlType) {
+        self.inputs.insert(index.min(self.inputs.len()), sql_type);
+    }
+
+    pub fn input_iter(&self) -> slice::Iter<'_, SqlType> {
+        self.inputs.iter()
+    }
+
+    pub fn insert_output(&mut self, key: ResolveOutputKey, sql_type: SqlType) {
+        _ = self.outputs.insert(key.into(), sql_type)
+    }
+
+    pub fn output_iter(&self) -> hash_map::Iter<'_, ResolveOutputKey, SqlType> {
+        self.outputs.iter()
+    }
+}
+
+fn parse_placeholder(placeholder: impl AsRef<str>) -> Option<usize> {
+    let place = placeholder.as_ref();
+    if place == "?" {
+        return None;
+    }
+    place.split_at(1).1.parse().ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::resolve::parse_placeholder;
+
+    #[test]
+    fn parse_unnumbered_placeholder() {
+        let placeholder = "?";
+        assert_eq!(parse_placeholder(placeholder), None)
+    }
+
+    #[test]
+    fn parse_numbered_placeholder() {
+        let placeholder = "$5";
+        assert_eq!(parse_placeholder(placeholder), Some(5))
+    }
 }

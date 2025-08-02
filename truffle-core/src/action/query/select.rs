@@ -6,15 +6,17 @@ use sqlparser::ast::{Expr, Select, SelectItem, SelectItemQualifiedWildcardKind, 
 use crate::{
     Error, Simulator,
     action::join::{JoinContext, JoinInferrer},
-    expr::{ColumnInferrer, InferType},
+    expr::{ColumnInferrer, ExprFlow, InferType},
     object_name_to_strings,
+    resolve::{ResolveOutputKey, ResolvedQuery},
     ty::SqlType,
 };
 
 impl Simulator {
-    pub(crate) fn select(&self, sel: &Select) -> Result<(), Error> {
+    pub(crate) fn select(&self, sel: &Select) -> Result<ResolvedQuery, Error> {
         let mut columns = SelectColumns::List(vec![]);
         let mut contexts = vec![];
+        let mut resolved = ResolvedQuery::default();
 
         // Ensure we have a FROM clause.
         if sel.from.is_empty() {
@@ -48,6 +50,8 @@ impl Simulator {
                 &from_table_name,
                 from_table_alias.as_ref(),
                 &from.joins,
+                &mut resolved,
+                ExprFlow::Output,
             )?;
 
             contexts.push(join_table);
@@ -133,12 +137,24 @@ impl Simulator {
 
                 for context in &contexts {
                     for (col_ref, _) in context.refs.iter().unique_by(|r| *r.1) {
-                        let column = &col_ref.name;
+                        let column_name = &col_ref.name;
+                        let ty = inferrer.infer_qualified_type(
+                            self,
+                            &col_ref.qualifier,
+                            &col_ref.name,
+                        )?;
 
-                        if all_columns.contains(column) {
-                            return Err(Error::AmbiguousColumn(column.to_string()));
+                        if all_columns.contains(column_name) {
+                            return Err(Error::AmbiguousColumn(column_name.to_string()));
                         } else {
-                            all_columns.insert(column.to_string());
+                            resolved.insert_output(
+                                ResolveOutputKey::new(
+                                    Some(col_ref.qualifier.clone()),
+                                    col_ref.name.clone(),
+                                ),
+                                ty.clone(),
+                            );
+                            all_columns.insert(column_name.to_string());
                         }
                     }
                 }
@@ -198,10 +214,16 @@ impl Simulator {
 
         // Validate WHERE clause.
         if let Some(selection) = &sel.selection {
-            self.infer_expr_type(selection, InferType::Required(SqlType::Boolean), &inferrer)?;
+            self.infer_expr_type(
+                selection,
+                InferType::Required(SqlType::Boolean),
+                &inferrer,
+                &mut resolved,
+                ExprFlow::Input,
+            )?;
         }
 
-        Ok(())
+        Ok(resolved)
     }
 }
 
@@ -813,7 +835,7 @@ mod tests {
         .unwrap();
 
         sim.execute("select person.* from person join order on person.id = order.person_id")
-            .unwrap()
+            .unwrap();
     }
 
     #[test]
@@ -1368,7 +1390,7 @@ mod tests {
         .unwrap();
 
         sim.execute("select person.*, order.total from person left join order on person.id = order.person_id")
-            .unwrap()
+            .unwrap();
     }
 
     #[test]
@@ -1380,7 +1402,7 @@ mod tests {
             .unwrap();
 
         sim.execute("select users.name, orders.total from users left outer join orders on users.id = orders.user_id")
-            .unwrap()
+            .unwrap();
     }
 
     #[test]
@@ -1406,7 +1428,7 @@ mod tests {
         .unwrap();
 
         sim.execute("select person.name, order.* from person right join order on person.id = order.person_id")
-            .unwrap()
+            .unwrap();
     }
 
     #[test]
@@ -1418,7 +1440,7 @@ mod tests {
             .unwrap();
 
         sim.execute("select employees.name, departments.dept_name from employees right outer join departments on employees.id = departments.emp_id")
-            .unwrap()
+            .unwrap();
     }
 
     #[test]
@@ -1442,7 +1464,7 @@ mod tests {
             .unwrap();
 
         sim.execute("select customers.name, orders.amount from customers full outer join orders on customers.id = orders.customer_id")
-            .unwrap()
+            .unwrap();
     }
 
     #[test]
@@ -1472,5 +1494,26 @@ mod tests {
                 got: SqlType::Text
             })
         );
+    }
+
+    #[test]
+    fn select_with_resolved_input_output() {
+        let mut sim = Simulator::new(GenericDialect {});
+        sim.execute("create table person (id integer not null, name text not null, weight float default 10.01)").unwrap();
+
+        let resolve = sim.execute("select * from person where id = $1").unwrap();
+
+        assert_eq!(resolve.inputs.len(), 1);
+        assert_eq!(resolve.get_input(0).unwrap(), &SqlType::Integer);
+
+        assert_eq!(resolve.outputs.len(), 3);
+        resolve
+            .output_iter()
+            .for_each(|(key, ty)| match key.name.as_ref() {
+                "id" => assert!(ty == &SqlType::Integer),
+                "name" => assert!(ty == &SqlType::Text),
+                "weight" => assert!(ty == &SqlType::Float),
+                _ => unreachable!(),
+            });
     }
 }

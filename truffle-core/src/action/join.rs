@@ -6,8 +6,9 @@ use sqlparser::ast::{Join, JoinConstraint, JoinOperator, TableFactor};
 use crate::{
     Error, Simulator,
     column::Column,
-    expr::{ColumnInferrer, InferType},
+    expr::{ColumnInferrer, ExprFlow, InferType},
     object_name_to_strings,
+    resolve::ResolvedQuery,
     table::Table,
     ty::SqlType,
 };
@@ -19,6 +20,8 @@ impl Simulator {
         name: &str,
         alias: Option<&String>,
         joins: &[Join],
+        resolved: &mut ResolvedQuery,
+        flow: ExprFlow,
     ) -> Result<JoinContext, Error> {
         let mut join_ctx = JoinContext::from_table(table, name, alias)?;
 
@@ -46,8 +49,9 @@ impl Simulator {
                             right_table,
                             &right_table_name,
                             right_table_alias.as_ref(),
+                            resolved,
+                            flow,
                         )?,
-                        // TODO: Pass join info down.
                         JoinOperator::Left(join_constraint)
                         | JoinOperator::LeftOuter(join_constraint) => self.handle_join_constraint(
                             join_constraint,
@@ -55,8 +59,9 @@ impl Simulator {
                             right_table,
                             &right_table_name,
                             right_table_alias.as_ref(),
+                            resolved,
+                            flow,
                         )?,
-                        // TODO: Pass join info down.
                         JoinOperator::Right(join_constraint)
                         | JoinOperator::RightOuter(join_constraint) => self
                             .handle_join_constraint(
@@ -65,14 +70,17 @@ impl Simulator {
                                 right_table,
                                 &right_table_name,
                                 right_table_alias.as_ref(),
+                                resolved,
+                                flow,
                             )?,
-                        // TODO: Pass join info down.
                         JoinOperator::FullOuter(join_constraint) => self.handle_join_constraint(
                             join_constraint,
                             &mut join_ctx,
                             right_table,
                             &right_table_name,
                             right_table_alias.as_ref(),
+                            resolved,
+                            flow,
                         )?,
                         JoinOperator::CrossJoin => join_ctx.join_table(
                             right_table,
@@ -107,6 +115,8 @@ impl Simulator {
         right_table: &Table,
         right_table_name: &str,
         right_table_alias: Option<&String>,
+        resolved: &mut ResolvedQuery,
+        flow: ExprFlow,
     ) -> Result<(), Error> {
         match join_constraint {
             JoinConstraint::On(expr) => {
@@ -115,8 +125,13 @@ impl Simulator {
                     right_table: (right_table_name, right_table),
                 };
 
-                let ty =
-                    self.infer_expr_type(expr, InferType::Required(SqlType::Boolean), &inferrer)?;
+                let ty = self.infer_expr_type(
+                    expr,
+                    InferType::Required(SqlType::Boolean),
+                    &inferrer,
+                    resolved,
+                    flow,
+                )?;
 
                 if ty != SqlType::Boolean {
                     return Err(Error::TypeMismatch {

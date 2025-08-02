@@ -9,13 +9,19 @@ use time::{
     },
 };
 
-use crate::{Error, Simulator, ty::SqlType};
+use crate::{Error, Simulator, resolve::ResolvedQuery, ty::SqlType};
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub enum InferType {
     Required(SqlType),
     // Hint(SqlType),
     Unknown,
+}
+
+#[derive(Debug, Copy, Clone)]
+pub enum ExprFlow {
+    Input,
+    Output,
 }
 
 pub trait ColumnInferrer {
@@ -39,28 +45,33 @@ impl Simulator {
         expr: &Expr,
         expected: InferType,
         inferrer: &I,
+        resolved: &mut ResolvedQuery,
+        flow: ExprFlow,
     ) -> Result<SqlType, Error> {
         let expect = expected.clone();
 
         let ty: SqlType = match expr {
-            Expr::Value(val) => Self::infer_value_type(&val.value, expected)?,
+            Expr::Value(val) => Self::infer_value_type(&val.value, expected, resolved, flow)?,
             Expr::IsTrue(expr)
             | Expr::IsNotTrue(expr)
             | Expr::IsFalse(expr)
             | Expr::IsNotFalse(expr) => {
-                assert_eq!(
-                    self.infer_expr_type(expr, InferType::Required(SqlType::Boolean), inferrer)?,
-                    SqlType::Boolean
-                );
+                self.infer_expr_type(
+                    expr,
+                    InferType::Required(SqlType::Boolean),
+                    inferrer,
+                    resolved,
+                    flow,
+                )?;
                 SqlType::Boolean
             }
             Expr::IsUnknown(expr) | Expr::IsNotUnknown(expr) => {
-                self.infer_expr_type(expr, InferType::Unknown, inferrer)?;
+                self.infer_expr_type(expr, InferType::Unknown, inferrer, resolved, flow)?;
                 SqlType::Boolean
             }
 
             Expr::IsNull(expr) | Expr::IsNotNull(expr) => {
-                self.infer_expr_type(expr, InferType::Unknown, inferrer)?;
+                self.infer_expr_type(expr, InferType::Unknown, inferrer, resolved, flow)?;
                 SqlType::Boolean
             }
             Expr::Identifier(ident) => {
@@ -78,15 +89,24 @@ impl Simulator {
                 inferrer.infer_qualified_type(self, table_or_alias, column_name)?
             }
             Expr::BinaryOp { left, right, op } => {
-                self.infer_binary_op_type(left, right, op, expected, inferrer)?
+                self.infer_binary_op_type([left, right], op, expected, inferrer, resolved, flow)?
             }
-            Expr::UnaryOp { expr, op } => self.infer_unary_op_type(expr, op, expected, inferrer)?,
-            Expr::Nested(expr) => self.infer_expr_type(expr, expected, inferrer)?,
+            Expr::UnaryOp { expr, op } => {
+                self.infer_unary_op_type(expr, op, expected, inferrer, resolved, flow)?
+            }
+            Expr::Nested(expr) => self.infer_expr_type(expr, expected, inferrer, resolved, flow)?,
             Expr::InList { expr, list, .. } => {
-                let ty = self.infer_expr_type(expr, InferType::Unknown, inferrer)?;
+                let ty =
+                    self.infer_expr_type(expr, InferType::Unknown, inferrer, resolved, flow)?;
                 for item in list {
                     assert_eq!(
-                        self.infer_expr_type(item, InferType::Required(ty.clone()), inferrer)?,
+                        self.infer_expr_type(
+                            item,
+                            InferType::Required(ty.clone()),
+                            inferrer,
+                            resolved,
+                            flow
+                        )?,
                         ty
                     );
                 }
@@ -103,7 +123,13 @@ impl Simulator {
                 match kind {
                     CastKind::Cast | CastKind::DoubleColon => {
                         // TODO: Ensure the two types are castable.
-                        let _inner_ty = self.infer_expr_type(expr, InferType::Unknown, inferrer)?;
+                        let _inner_ty = self.infer_expr_type(
+                            expr,
+                            InferType::Unknown,
+                            inferrer,
+                            resolved,
+                            flow,
+                        )?;
 
                         ty
                     }
@@ -122,7 +148,15 @@ impl Simulator {
                     let inner_tuple_tys: Result<Vec<SqlType>, Error> = exprs
                         .iter()
                         .zip(tys)
-                        .map(|(e, ty)| self.infer_expr_type(e, InferType::Required(ty), inferrer))
+                        .map(|(e, ty)| {
+                            self.infer_expr_type(
+                                e,
+                                InferType::Required(ty),
+                                inferrer,
+                                resolved,
+                                flow,
+                            )
+                        })
                         .collect();
 
                     SqlType::Tuple(inner_tuple_tys?)
@@ -131,7 +165,7 @@ impl Simulator {
                     exprs
                         .iter()
                         .map(|e| {
-                            self.infer_expr_type(e, InferType::Unknown, inferrer)
+                            self.infer_expr_type(e, InferType::Unknown, inferrer, resolved, flow)
                                 .unwrap()
                         })
                         .collect(),
@@ -156,7 +190,12 @@ impl Simulator {
         Ok(ty)
     }
 
-    fn infer_value_type(value: &Value, expected: InferType) -> Result<SqlType, Error> {
+    fn infer_value_type(
+        value: &Value,
+        expected: InferType,
+        resolved: &mut ResolvedQuery,
+        flow: ExprFlow,
+    ) -> Result<SqlType, Error> {
         match value {
             Value::Number(str, _) => {
                 // Initially, try to use the expected type.
@@ -272,8 +311,12 @@ impl Simulator {
             }
             Value::Boolean(_) => Ok(SqlType::Boolean),
             Value::Null => Ok(SqlType::Null),
-            Value::Placeholder(_) => match expected {
-                InferType::Required(ty) => Ok(ty),
+            Value::Placeholder(placeholder) => match expected {
+                InferType::Required(ty) => {
+                    assert!(matches!(flow, ExprFlow::Input));
+                    resolved.insert_input(placeholder, ty.clone());
+                    Ok(ty)
+                }
                 _ => Err(Error::Unsupported(
                     "Cannot infer type of the placeholder".to_string(),
                 )),
@@ -284,21 +327,28 @@ impl Simulator {
 
     fn infer_binary_op_type<I: ColumnInferrer>(
         &self,
-        left: &Expr,
-        right: &Expr,
+        exprs: [&Expr; 2],
         op: &BinaryOperator,
         expected: InferType,
         inferrer: &I,
+        resolved: &mut ResolvedQuery,
+        flow: ExprFlow,
     ) -> Result<SqlType, Error> {
+        let [left, right] = exprs;
         match op {
             BinaryOperator::Plus
             | BinaryOperator::Minus
             | BinaryOperator::Multiply
             | BinaryOperator::Divide
             | BinaryOperator::Modulo => {
-                let left_ty = self.infer_expr_type(left, expected, inferrer)?;
-                let right_ty =
-                    self.infer_expr_type(right, InferType::Required(left_ty.clone()), inferrer)?;
+                let left_ty = self.infer_expr_type(left, expected, inferrer, resolved, flow)?;
+                let right_ty = self.infer_expr_type(
+                    right,
+                    InferType::Required(left_ty.clone()),
+                    inferrer,
+                    resolved,
+                    flow,
+                )?;
 
                 assert_eq!(left_ty, right_ty);
                 Ok(left_ty)
@@ -309,9 +359,15 @@ impl Simulator {
             | BinaryOperator::LtEq
             | BinaryOperator::Eq
             | BinaryOperator::NotEq => {
-                let left_ty = self.infer_expr_type(left, InferType::Unknown, inferrer)?;
-                let right_ty =
-                    self.infer_expr_type(right, InferType::Required(left_ty.clone()), inferrer)?;
+                let left_ty =
+                    self.infer_expr_type(left, InferType::Unknown, inferrer, resolved, flow)?;
+                let right_ty = self.infer_expr_type(
+                    right,
+                    InferType::Required(left_ty.clone()),
+                    inferrer,
+                    resolved,
+                    flow,
+                )?;
 
                 if left_ty != right_ty {
                     return Err(Error::TypeMismatch {
@@ -323,18 +379,33 @@ impl Simulator {
                 Ok(SqlType::Boolean)
             }
             BinaryOperator::And | BinaryOperator::Or | BinaryOperator::Xor => {
-                let left_ty =
-                    self.infer_expr_type(left, InferType::Required(SqlType::Boolean), inferrer)?;
-                let right_ty =
-                    self.infer_expr_type(right, InferType::Required(left_ty.clone()), inferrer)?;
+                let left_ty = self.infer_expr_type(
+                    left,
+                    InferType::Required(SqlType::Boolean),
+                    inferrer,
+                    resolved,
+                    flow,
+                )?;
+                let right_ty = self.infer_expr_type(
+                    right,
+                    InferType::Required(left_ty.clone()),
+                    inferrer,
+                    resolved,
+                    flow,
+                )?;
 
                 assert_eq!(left_ty, right_ty);
                 Ok(SqlType::Boolean)
             }
             BinaryOperator::BitwiseOr | BinaryOperator::BitwiseAnd | BinaryOperator::BitwiseXor => {
-                let left_ty = self.infer_expr_type(left, expected, inferrer)?;
-                let right_ty =
-                    self.infer_expr_type(right, InferType::Required(left_ty.clone()), inferrer)?;
+                let left_ty = self.infer_expr_type(left, expected, inferrer, resolved, flow)?;
+                let right_ty = self.infer_expr_type(
+                    right,
+                    InferType::Required(left_ty.clone()),
+                    inferrer,
+                    resolved,
+                    flow,
+                )?;
 
                 if !left_ty.is_integer() {
                     return Err(Error::TypeMismatch {
@@ -358,10 +429,12 @@ impl Simulator {
         op: &UnaryOperator,
         expected: InferType,
         inferrer: &I,
+        resolved: &mut ResolvedQuery,
+        flow: ExprFlow,
     ) -> Result<SqlType, Error> {
         match op {
             UnaryOperator::Plus | UnaryOperator::Minus => {
-                let ty = self.infer_expr_type(expr, expected, inferrer)?;
+                let ty = self.infer_expr_type(expr, expected, inferrer, resolved, flow)?;
                 if !ty.is_numeric() {
                     Err(Error::TypeNotNumeric(ty))
                 } else {
@@ -370,7 +443,13 @@ impl Simulator {
             }
             UnaryOperator::Not => {
                 assert_eq!(
-                    self.infer_expr_type(expr, InferType::Required(SqlType::Boolean), inferrer)?,
+                    self.infer_expr_type(
+                        expr,
+                        InferType::Required(SqlType::Boolean),
+                        inferrer,
+                        resolved,
+                        flow
+                    )?,
                     SqlType::Boolean
                 );
                 Ok(SqlType::Boolean)
