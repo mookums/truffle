@@ -41,6 +41,8 @@ pub enum Error {
     AliasDoesntExist(String),
     #[error("Table or Alias '{0}' doesn't exist")]
     TableOrAliasDoesntExist(String),
+    #[error("Qualified Column '{qualifier}.{column}' doesn't exist")]
+    QualifiedColumnDoesntExist { qualifier: String, column: String },
     #[error("Alias '{0}' is the name of an existing Table")]
     AliasIsTableName(String),
     #[error("Foreign Key Constraint Failure on Column '{0}'")]
