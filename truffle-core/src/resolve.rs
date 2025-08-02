@@ -3,7 +3,7 @@ use std::{
     slice,
 };
 
-use crate::ty::SqlType;
+use crate::{column::Column, ty::SqlType};
 use itertools::Itertools;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
@@ -24,7 +24,7 @@ impl ResolveOutputKey {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ResolvedQuery {
     pub inputs: Vec<SqlType>,
-    pub outputs: HashMap<ResolveOutputKey, SqlType>,
+    pub outputs: HashMap<ResolveOutputKey, Column>,
 }
 
 impl ResolvedQuery {
@@ -49,11 +49,11 @@ impl ResolvedQuery {
         self.inputs.iter()
     }
 
-    pub fn insert_output(&mut self, key: ResolveOutputKey, sql_type: SqlType) {
-        _ = self.outputs.insert(key, sql_type)
+    pub fn insert_output(&mut self, key: ResolveOutputKey, col: Column) {
+        _ = self.outputs.insert(key, col)
     }
 
-    pub fn get_output(&self, key: &ResolveOutputKey) -> Option<&SqlType> {
+    pub fn get_output(&self, key: &ResolveOutputKey) -> Option<&Column> {
         self.outputs.get(key)
     }
 
@@ -61,7 +61,7 @@ impl ResolvedQuery {
     ///
     /// If there are multiple output columns with the same name, it will return None.
     /// If there are no output columns with the name, it will return None.
-    pub fn get_output_with_name(&self, name: impl AsRef<str>) -> Option<&SqlType> {
+    pub fn get_output_with_name(&self, name: impl AsRef<str>) -> Option<&Column> {
         self.outputs
             .iter()
             .filter(|o| o.0.name == name.as_ref())
@@ -71,7 +71,7 @@ impl ResolvedQuery {
             .map(|c| c.1)
     }
 
-    pub fn output_iter(&self) -> hash_map::Iter<'_, ResolveOutputKey, SqlType> {
+    pub fn output_iter(&self) -> hash_map::Iter<'_, ResolveOutputKey, Column> {
         self.outputs.iter()
     }
 }

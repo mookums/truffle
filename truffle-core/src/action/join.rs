@@ -21,7 +21,6 @@ impl Simulator {
         alias: Option<&String>,
         joins: &[Join],
         resolved: &mut ResolvedQuery,
-        flow: ExprFlow,
     ) -> Result<JoinContext, Error> {
         let mut join_ctx = JoinContext::from_table(table, name, alias)?;
 
@@ -50,7 +49,6 @@ impl Simulator {
                             &right_table_name,
                             right_table_alias.as_ref(),
                             resolved,
-                            flow,
                         )?,
                         JoinOperator::Left(join_constraint)
                         | JoinOperator::LeftOuter(join_constraint) => self.handle_join_constraint(
@@ -60,7 +58,6 @@ impl Simulator {
                             &right_table_name,
                             right_table_alias.as_ref(),
                             resolved,
-                            flow,
                         )?,
                         JoinOperator::Right(join_constraint)
                         | JoinOperator::RightOuter(join_constraint) => self
@@ -71,7 +68,6 @@ impl Simulator {
                                 &right_table_name,
                                 right_table_alias.as_ref(),
                                 resolved,
-                                flow,
                             )?,
                         JoinOperator::FullOuter(join_constraint) => self.handle_join_constraint(
                             join_constraint,
@@ -80,7 +76,6 @@ impl Simulator {
                             &right_table_name,
                             right_table_alias.as_ref(),
                             resolved,
-                            flow,
                         )?,
                         JoinOperator::CrossJoin => join_ctx.join_table(
                             right_table,
@@ -116,7 +111,6 @@ impl Simulator {
         right_table_name: &str,
         right_table_alias: Option<&String>,
         resolved: &mut ResolvedQuery,
-        flow: ExprFlow,
     ) -> Result<(), Error> {
         match join_constraint {
             JoinConstraint::On(expr) => {
@@ -130,7 +124,7 @@ impl Simulator {
                     InferType::Required(SqlType::Boolean),
                     &inferrer,
                     resolved,
-                    flow,
+                    ExprFlow::Input,
                 )?;
 
                 if ty != SqlType::Boolean {
@@ -418,33 +412,13 @@ impl JoinContext {
         self.refs.keys().any(|k| k.qualifier == table)
     }
 
-    pub fn has_column_in_table(&self, table: &str, column: &str) -> bool {
-        self.refs
-            .iter()
-            .any(|(r, _)| r.qualifier == table && r.name == column)
-    }
-
-    pub fn has_column(&self, column: &str) -> bool {
-        self.refs.keys().map(|k| &k.name).any(|n| n == column)
-    }
-
-    fn infer_unqualified_type(
-        &self,
-        sim: &Simulator,
-        column: &str,
-    ) -> Result<Option<SqlType>, Error> {
-        fn unwrap_match(sim: &Simulator, matches: &[(ColumnRef, usize)]) -> Result<SqlType, Error> {
+    pub fn get_column(&self, column: &str) -> Result<Option<&Column>, Error> {
+        fn match_into_ty<'a>(
+            join_ctx: &'a JoinContext,
+            matches: &[(ColumnRef, usize)],
+        ) -> Result<Option<&'a Column>, Error> {
             let m = matches.first().unwrap();
-            let col_ref = &m.0;
-            let ty = sim
-                .get_table(&col_ref.qualifier)
-                .unwrap()
-                .get_column(&col_ref.name)
-                .unwrap()
-                .ty
-                .clone();
-
-            Ok(ty)
+            Ok(join_ctx.columns.get(m.1))
         }
 
         let matches: Vec<(ColumnRef, usize)> = self
@@ -456,65 +430,56 @@ impl JoinContext {
 
         match matches.len() {
             0 => Ok(None),
-            1 => unwrap_match(sim, &matches).map(Some),
+            1 => match_into_ty(self, &matches),
             _ => {
                 let same_logical = matches.iter().map(|m| m.1).all_equal();
-
-                // It is only ambiguous if they map to different logical columns.
-                if !same_logical {
-                    Err(Error::AmbiguousColumn(column.to_string()))
+                if same_logical {
+                    match_into_ty(self, &matches)
                 } else {
-                    unwrap_match(sim, &matches).map(Some)
+                    // It is only ambiguous if they map to different logical columns.
+                    Err(Error::AmbiguousColumn(column.to_string()))
                 }
             }
         }
     }
 
-    fn infer_qualified_type(
+    pub fn get_qualified_column(
         &self,
-        sim: &Simulator,
         qualifier: &str,
         column: &str,
-        matched: &mut bool,
-    ) -> Option<SqlType> {
-        // Check raw qualifier first.
-        let columns: Vec<String> = self
+    ) -> Result<Option<&Column>, Error> {
+        // Attempt to dereference the alias first.
+        let true_qualifier = self
+            .aliases
+            .get(qualifier)
+            .map(|q| q.as_ref())
+            .unwrap_or(qualifier);
+
+        let matches: Vec<_> = self
             .refs
             .iter()
-            .filter(|(r, _)| r.qualifier == qualifier)
-            .map(|(r, _)| r.name.clone())
+            .filter(|(k, _)| k.name == column && k.qualifier == true_qualifier)
             .collect();
 
-        if !columns.is_empty() {
-            *matched = true;
-            if columns.contains(&column.to_string()) {
-                return Some(
-                    sim.get_table(qualifier)
-                        .unwrap()
-                        .get_column(column)
-                        .unwrap()
-                        .ty
-                        .clone(),
-                );
+        match matches.len() {
+            0 => Ok(None),
+            1 => Ok(self.columns.get(*matches[0].1)),
+            _ => {
+                // Should be impossible for us to have multiple logical columns for a qualified match.
+                assert!(matches.iter().map(|(_, idx)| idx).all_equal());
+                Ok(self.columns.get(*matches[0].1))
             }
         }
+    }
 
-        // Check if it is an alias.
-        if let Some(table_name) = self.aliases.get(qualifier) {
-            *matched = true;
-            if self.refs.contains_key(&ColumnRef::new(table_name, column)) {
-                return Some(
-                    sim.get_table(table_name)
-                        .unwrap()
-                        .get_column(column)
-                        .unwrap()
-                        .ty
-                        .clone(),
-                );
-            }
-        }
+    fn infer_unqualified_type(&self, column: &str) -> Result<Option<SqlType>, Error> {
+        Ok(self.get_column(column)?.map(|col| col.ty.clone()))
+    }
 
-        None
+    fn infer_qualified_type(&self, qualifier: &str, column: &str) -> Result<SqlType, Error> {
+        self.get_qualified_column(qualifier, column)?
+            .map(|col| col.ty.clone())
+            .ok_or_else(|| Error::ColumnDoesntExist(column.to_string()))
     }
 }
 
@@ -525,13 +490,13 @@ pub struct JoinInferrer<'a> {
 impl<'a> ColumnInferrer for JoinInferrer<'a> {
     fn infer_unqualified_type(
         &self,
-        sim: &Simulator,
+        _sim: &Simulator,
         column: &str,
     ) -> Result<Option<SqlType>, Error> {
         let mut found_ty: Option<SqlType> = None;
 
         for join_ctx in self.join_contexts {
-            let new_found_ty = join_ctx.infer_unqualified_type(sim, column)?;
+            let new_found_ty = join_ctx.infer_unqualified_type(column)?;
             if let Some(ty) = new_found_ty {
                 match found_ty {
                     Some(_) => return Err(Error::AmbiguousColumn(column.to_string())),
@@ -545,23 +510,20 @@ impl<'a> ColumnInferrer for JoinInferrer<'a> {
 
     fn infer_qualified_type(
         &self,
-        sim: &Simulator,
+        _sim: &Simulator,
         qualifier: &str,
         column: &str,
     ) -> Result<SqlType, Error> {
-        let mut matched = false;
-        // Search for Absolutes first.
         for join_ctx in self.join_contexts {
-            if let Some(ty) = join_ctx.infer_qualified_type(sim, qualifier, column, &mut matched) {
+            if let Ok(ty) = join_ctx.infer_qualified_type(qualifier, column) {
                 return Ok(ty);
             }
         }
 
-        if matched {
-            Err(Error::ColumnDoesntExist(column.to_string()))
-        } else {
-            Err(Error::TableOrAliasDoesntExist(qualifier.to_string()))
-        }
+        Err(Error::QualifiedColumnDoesntExist {
+            qualifier: qualifier.to_string(),
+            column: column.to_string(),
+        })
     }
 }
 
@@ -573,11 +535,11 @@ struct JoinContextInferrer<'a> {
 impl<'a> ColumnInferrer for JoinContextInferrer<'a> {
     fn infer_unqualified_type(
         &self,
-        sim: &Simulator,
+        _sim: &Simulator,
         column: &str,
     ) -> Result<Option<SqlType>, Error> {
         // Search Join Table.
-        let mut found_ty = self.join_ctx.infer_unqualified_type(sim, column)?;
+        let mut found_ty = self.join_ctx.infer_unqualified_type(column)?;
 
         // Search Right Table.
         if let Some(col) = self.right_table.1.get_column(column) {
@@ -593,31 +555,24 @@ impl<'a> ColumnInferrer for JoinContextInferrer<'a> {
 
     fn infer_qualified_type(
         &self,
-        sim: &Simulator,
+        _sim: &Simulator,
         qualifier: &str,
         column: &str,
     ) -> Result<SqlType, Error> {
-        let mut matched = false;
-
-        if let Some(ty) = self
-            .join_ctx
-            .infer_qualified_type(sim, qualifier, column, &mut matched)
-        {
+        if let Ok(ty) = self.join_ctx.infer_qualified_type(qualifier, column) {
             Ok(ty)
         } else {
             // Otherwise, try to find it in the right table...
             if self.right_table.0 == qualifier {
-                matched = true;
                 if let Some(col) = self.right_table.1.get_column(column) {
                     return Ok(col.ty.clone());
                 }
             }
 
-            if matched {
-                Err(Error::ColumnDoesntExist(column.to_string()))
-            } else {
-                Err(Error::TableOrAliasDoesntExist(qualifier.to_string()))
-            }
+            Err(Error::QualifiedColumnDoesntExist {
+                qualifier: qualifier.to_string(),
+                column: column.to_string(),
+            })
         }
     }
 }

@@ -6,7 +6,7 @@ use sqlparser::ast::{Expr, Select, SelectItem, SelectItemQualifiedWildcardKind, 
 use crate::{
     Error, Simulator,
     action::join::{JoinContext, JoinInferrer},
-    expr::{ColumnInferrer, ExprFlow, InferType},
+    expr::{ExprFlow, InferType},
     object_name_to_strings,
     resolve::{ResolveOutputKey, ResolvedQuery},
     ty::SqlType,
@@ -51,7 +51,6 @@ impl Simulator {
                 from_table_alias.as_ref(),
                 &from.joins,
                 &mut resolved,
-                ExprFlow::Output,
             )?;
 
             contexts.push(join_table);
@@ -141,18 +140,17 @@ impl Simulator {
                         if all_columns.contains(column_name) {
                             return Err(Error::AmbiguousColumn(column_name.to_string()));
                         } else {
-                            let inferred_type = inferrer.infer_qualified_type(
-                                self,
-                                &col_ref.qualifier,
-                                &col_ref.name,
-                            )?;
+                            // The existence of this column should've already been confirmed earlier.
+                            let column = context
+                                .get_qualified_column(&col_ref.qualifier, &col_ref.name)?
+                                .unwrap();
 
                             resolved.insert_output(
                                 ResolveOutputKey::new(
                                     Some(col_ref.qualifier.clone()),
                                     col_ref.name.clone(),
                                 ),
-                                inferred_type.clone(),
+                                column.clone(),
                             );
 
                             all_columns.insert(column_name.to_string());
@@ -164,22 +162,28 @@ impl Simulator {
                 for column in list.into_iter() {
                     match column {
                         SelectColumn::Unqualified(column) => {
-                            let Some(inferred_type) =
-                                inferrer.infer_unqualified_type(self, &column)?
-                            else {
-                                return Err(Error::ColumnDoesntExist(column));
-                            };
+                            let true_column = contexts
+                                .iter()
+                                .filter_map(|c| c.get_column(&column).transpose())
+                                .at_most_one()
+                                .map_err(|_| Error::AmbiguousColumn(column.clone()))?
+                                .ok_or_else(|| Error::ColumnDoesntExist(column.clone()))??;
 
-                            resolved
-                                .insert_output(ResolveOutputKey::new(None, column), inferred_type);
+                            resolved.insert_output(
+                                ResolveOutputKey::new(None, column),
+                                true_column.clone(),
+                            );
                         }
                         SelectColumn::Absolute { table, column } => {
-                            let inferred_type =
-                                inferrer.infer_qualified_type(self, &table, &column)?;
+                            let true_column = contexts
+                                .iter()
+                                .filter_map(|c| c.get_qualified_column(&table, &column).transpose())
+                                .exactly_one()
+                                .map_err(|_| Error::ColumnDoesntExist(column.to_string()))??;
 
                             resolved.insert_output(
                                 ResolveOutputKey::new(Some(table), column),
-                                inferred_type,
+                                true_column.clone(),
                             );
                         }
                         SelectColumn::Aliased { alias, column } => {
@@ -192,13 +196,13 @@ impl Simulator {
                                 return Err(Error::TableDoesntExist(table_name.clone()));
                             }
 
-                            let inferred_type =
-                                inferrer.infer_qualified_type(self, table_name, &column)?;
+                            // let inferred_type =
+                            //     inferrer.infer_qualified_type(self, table_name, &column)?;
 
-                            resolved.insert_output(
-                                ResolveOutputKey::new(Some(table_name.clone()), column),
-                                inferred_type,
-                            );
+                            // resolved.insert_output(
+                            //     ResolveOutputKey::new(Some(table_name.clone()), column),
+                            //     inferred_type,
+                            // );
                         }
                         SelectColumn::AliasedWildcard(alias) => {
                             let table_name = contexts
@@ -216,19 +220,19 @@ impl Simulator {
                                 .flat_map(|c| &c.refs)
                                 .unique_by(|r| r.1)
                             {
-                                let inferred_type = inferrer.infer_qualified_type(
-                                    self,
-                                    &col_ref.qualifier,
-                                    &col_ref.name,
-                                )?;
+                                // let inferred_type = inferrer.infer_qualified_type(
+                                //     self,
+                                //     &col_ref.qualifier,
+                                //     &col_ref.name,
+                                // )?;
 
-                                resolved.insert_output(
-                                    ResolveOutputKey::new(
-                                        Some(col_ref.qualifier.clone()),
-                                        col_ref.name.clone(),
-                                    ),
-                                    inferred_type.clone(),
-                                );
+                                // resolved.insert_output(
+                                //     ResolveOutputKey::new(
+                                //         Some(col_ref.qualifier.clone()),
+                                //         col_ref.name.clone(),
+                                //     ),
+                                //     inferred_type.clone(),
+                                // );
                             }
                         }
                         SelectColumn::AbsoluteWildcard(table) => {
@@ -245,19 +249,19 @@ impl Simulator {
                                 .flat_map(|c| &c.refs)
                                 .unique_by(|r| r.1)
                             {
-                                let inferred_type = inferrer.infer_qualified_type(
-                                    self,
-                                    &col_ref.qualifier,
-                                    &col_ref.name,
-                                )?;
+                                // let inferred_type = inferrer.infer_qualified_type(
+                                //     self,
+                                //     &col_ref.qualifier,
+                                //     &col_ref.name,
+                                // )?;
 
-                                resolved.insert_output(
-                                    ResolveOutputKey::new(
-                                        Some(col_ref.qualifier.clone()),
-                                        col_ref.name.clone(),
-                                    ),
-                                    inferred_type.clone(),
-                                );
+                                // resolved.insert_output(
+                                //     ResolveOutputKey::new(
+                                //         Some(col_ref.qualifier.clone()),
+                                //         col_ref.name.clone(),
+                                //     ),
+                                //     inferred_type.clone(),
+                                // );
                             }
                         }
                     }
@@ -298,7 +302,7 @@ impl SelectColumns {
 }
 
 pub enum SelectColumn {
-    /// This is the true name of the column.)
+    /// This is the true name of the column.
     Unqualified(String),
     /// This is an absolute qualified (eg. table.col)
     Absolute { table: String, column: String },
@@ -680,7 +684,10 @@ mod tests {
             .unwrap();
         assert_eq!(
             sim.execute("select name from person where person.weight = 100"),
-            Err(Error::ColumnDoesntExist("weight".to_string()))
+            Err(Error::QualifiedColumnDoesntExist {
+                qualifier: "person".to_string(),
+                column: "weight".to_string()
+            })
         );
     }
 
@@ -691,7 +698,10 @@ mod tests {
             .unwrap();
         assert_eq!(
             sim.execute("select name from person where company.id = 1"),
-            Err(Error::TableOrAliasDoesntExist("company".to_string()))
+            Err(Error::QualifiedColumnDoesntExist {
+                qualifier: "company".to_string(),
+                column: "id".to_string()
+            })
         );
     }
 
@@ -702,7 +712,10 @@ mod tests {
             .unwrap();
         assert_eq!(
             sim.execute("select name from person p where x.id = 1"),
-            Err(Error::TableOrAliasDoesntExist("x".to_string()))
+            Err(Error::QualifiedColumnDoesntExist {
+                qualifier: "x".to_string(),
+                column: "id".to_string()
+            })
         );
     }
 
@@ -1002,7 +1015,10 @@ mod tests {
                 users join orders o on users.id = orders.user_id,
                 products join orders on users.id = orders.product_id ",
             ),
-            Err(Error::TableOrAliasDoesntExist("users".to_string()))
+            Err(Error::QualifiedColumnDoesntExist {
+                qualifier: "users".to_string(),
+                column: "id".to_string()
+            })
         );
     }
 
@@ -1019,7 +1035,10 @@ mod tests {
                 "select id from users 
                  join orders on users.id = products.id"
             ),
-            Err(Error::TableOrAliasDoesntExist("products".to_string()))
+            Err(Error::QualifiedColumnDoesntExist {
+                qualifier: "products".to_string(),
+                column: "id".to_string()
+            })
         );
     }
 
@@ -1498,23 +1517,30 @@ mod tests {
         assert_eq!(resolved.inputs.len(), 0);
         assert_eq!(resolved.outputs.len(), 2);
 
-        assert_eq!(resolved.get_output_with_name("name"), Some(&SqlType::Text));
         assert_eq!(
-            resolved.get_output_with_name("dept_name"),
+            resolved.get_output_with_name("name").map(|c| &c.ty),
             Some(&SqlType::Text)
         );
         assert_eq!(
-            resolved.get_output(&ResolveOutputKey::new(
-                Some("employees".to_string()),
-                "name"
-            )),
+            resolved.get_output_with_name("dept_name").map(|c| &c.ty),
             Some(&SqlType::Text)
         );
         assert_eq!(
-            resolved.get_output(&ResolveOutputKey::new(
-                Some("departments".to_string()),
-                "dept_name"
-            )),
+            resolved
+                .get_output(&ResolveOutputKey::new(
+                    Some("employees".to_string()),
+                    "name"
+                ))
+                .map(|c| &c.ty),
+            Some(&SqlType::Text)
+        );
+        assert_eq!(
+            resolved
+                .get_output(&ResolveOutputKey::new(
+                    Some("departments".to_string()),
+                    "dept_name"
+                ))
+                .map(|c| &c.ty),
             Some(&SqlType::Text)
         );
         assert_eq!(resolved.get_output_with_name("emp_id"), None);
@@ -1586,6 +1612,7 @@ mod tests {
         assert_eq!(resolve.outputs.len(), 3);
         resolve
             .output_iter()
+            .map(|(k, t)| (k, &t.ty))
             .for_each(|(key, ty)| match key.name.as_ref() {
                 "id" => assert!(ty == &SqlType::Integer),
                 "name" => assert!(ty == &SqlType::Text),
@@ -1607,6 +1634,7 @@ mod tests {
         assert_eq!(resolve.outputs.len(), 3);
         resolve
             .output_iter()
+            .map(|(k, t)| (k, &t.ty))
             .for_each(|(key, ty)| match key.name.as_ref() {
                 "id" => assert!(ty == &SqlType::Integer),
                 "name" => assert!(ty == &SqlType::Text),
