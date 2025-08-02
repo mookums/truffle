@@ -4,8 +4,9 @@ use tracing::debug;
 use crate::{
     Error, Simulator,
     column::Column,
-    expr::{ColumnInferrer, InferType},
+    expr::{ColumnInferrer, ExprFlow, InferType},
     object_name_to_strings,
+    resolve::ResolvedQuery,
     table::{Constraint, Table},
     ty::SqlType,
 };
@@ -18,6 +19,8 @@ impl Simulator {
         if !create_table.if_not_exists && self.tables.contains_key(&name) {
             return Err(Error::TableAlreadyExists(name));
         }
+
+        let mut resolved = ResolvedQuery::default();
 
         let mut table = Table::default();
         for column in create_table.columns {
@@ -37,14 +40,13 @@ impl Simulator {
                     }
                     ColumnOption::Default(expr) => {
                         let inferrer = CreateTableInferrer::default();
-                        assert_eq!(
-                            self.infer_expr_type(
-                                &expr,
-                                InferType::Required(ty.clone()),
-                                &inferrer
-                            )?,
-                            ty
-                        );
+                        self.infer_expr_type(
+                            &expr,
+                            InferType::Required(ty.clone()),
+                            &inferrer,
+                            &mut resolved,
+                            ExprFlow::Input,
+                        )?;
 
                         default = true;
                     }

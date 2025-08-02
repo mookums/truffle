@@ -1,14 +1,20 @@
 use sqlparser::ast::{Delete, FromTable, TableFactor};
 
-use crate::{Error, Simulator, expr::InferType, object_name_to_strings, ty::SqlType};
+use crate::{
+    Error, Simulator,
+    expr::{ExprFlow, InferType},
+    object_name_to_strings,
+    resolve::ResolvedQuery,
+    ty::SqlType,
+};
 
 use super::join::JoinInferrer;
 
 impl Simulator {
     pub(crate) fn delete(&self, delete: Delete) -> Result<(), Error> {
         // TODO: Support multi table deletes (for MySQL)
-
         let mut contexts = vec![];
+        let mut resolved = ResolvedQuery::default();
 
         match delete.from {
             FromTable::WithFromKeyword(tables_with_joins) => {
@@ -37,6 +43,8 @@ impl Simulator {
                         &from_table_name,
                         from_table_alias.as_ref(),
                         &from.joins,
+                        &mut resolved,
+                        ExprFlow::Input,
                     )?;
 
                     contexts.push(join_table);
@@ -54,8 +62,13 @@ impl Simulator {
         };
 
         if let Some(selection) = delete.selection {
-            let ty =
-                self.infer_expr_type(&selection, InferType::Required(SqlType::Boolean), &inferrer)?;
+            let ty = self.infer_expr_type(
+                &selection,
+                InferType::Required(SqlType::Boolean),
+                &inferrer,
+                &mut resolved,
+                ExprFlow::Input,
+            )?;
 
             if ty != SqlType::Boolean {
                 return Err(Error::TypeMismatch {

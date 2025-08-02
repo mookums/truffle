@@ -4,7 +4,7 @@ use crate::ty::SqlType;
 use serde::{Deserialize, Serialize};
 
 #[cfg_attr(feature = "serde", derive(Deserialize, Serialize))]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Column {
     pub ty: SqlType,
     pub nullable: bool,

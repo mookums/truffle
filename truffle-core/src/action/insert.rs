@@ -2,7 +2,7 @@ use sqlparser::ast::{Expr, Insert, SetExpr, TableObject, Value, ValueWithSpan};
 
 use crate::{
     Error, Simulator,
-    expr::{ColumnInferrer, InferType},
+    expr::{ColumnInferrer, ExprFlow, InferType},
     object_name_to_strings,
     resolve::ResolvedQuery,
 };
@@ -34,7 +34,6 @@ impl Simulator {
 
         // This stores the return information for this query.
         let mut resolved = ResolvedQuery::default();
-
         let inferrer = InsertInferrer::default();
 
         let source = ins.source.unwrap();
@@ -61,22 +60,12 @@ impl Simulator {
                             // Implicit (Table Index) Columns.
                             let expr = &row[i];
 
-                            if let Expr::Value(ValueWithSpan {
-                                value: Value::Placeholder(placeholder),
-                                ..
-                            }) = expr
-                            {
-                                resolved.inputs.insert_before(
-                                    i,
-                                    placeholder.to_string(),
-                                    column.clone(),
-                                );
-                            }
-
                             _ = self.infer_expr_type(
                                 expr,
                                 InferType::Required(column.ty.clone()),
                                 &inferrer,
+                                &mut resolved,
+                                ExprFlow::Input,
                             )?;
                         } else if let Some(index) =
                             provided_columns.iter().position(|pc| pc == column_name)
@@ -84,22 +73,12 @@ impl Simulator {
                             // If the column was named explicitly...
                             let expr = &row[index];
 
-                            if let Expr::Value(ValueWithSpan {
-                                value: Value::Placeholder(placeholder),
-                                ..
-                            }) = expr
-                            {
-                                resolved.inputs.insert_before(
-                                    i,
-                                    placeholder.to_string(),
-                                    column.clone(),
-                                );
-                            }
-
                             _ = self.infer_expr_type(
                                 expr,
                                 InferType::Required(column.ty.clone()),
                                 &inferrer,
+                                &mut resolved,
+                                ExprFlow::Input,
                             )?;
                         } else if !(column.nullable || column.default) {
                             // If the column was not named explicitly, we check it.
@@ -172,14 +151,16 @@ mod tests {
         let mut sim = Simulator::new(GenericDialect {});
         sim.execute("create table person (id integer not null, name text, weight real);")
             .unwrap();
-        assert_eq!(
+
+        assert!(
             sim.execute(
                 "insert into person (weight, name, id) values (221.9, 'John Doe', 10, 'abc', 'def')"
-            ),
-            Err(Error::ColumnCountMismatch {
-                expected: 3,
-                got: 5
-            })
+            )
+            .is_err_and(|e| e
+                == Error::ColumnCountMismatch {
+                    expected: 3,
+                    got: 5
+                })
         );
     }
 
@@ -188,12 +169,14 @@ mod tests {
         let mut sim = Simulator::new(GenericDialect {});
         sim.execute("create table person (id integer not null, name text, weight real);")
             .unwrap();
-        assert_eq!(
-            sim.execute("insert into person (id, name, weight) values ('id', 'John Doe', 12.1)"),
-            Err(Error::TypeMismatch {
-                expected: SqlType::Integer,
-                got: SqlType::Text
-            })
+
+        assert!(
+            sim.execute("insert into person (id, name, weight) values ('id', 'John Doe', 12.1)")
+                .is_err_and(|e| e
+                    == Error::TypeMismatch {
+                        expected: SqlType::Integer,
+                        got: SqlType::Text
+                    })
         );
     }
 
@@ -202,9 +185,10 @@ mod tests {
         let mut sim = Simulator::new(GenericDialect {});
         sim.execute("create table person (id integer not null, name text, weight real);")
             .unwrap();
-        assert_eq!(
-            sim.execute("insert into person (id, name, height) values (100, 'John Doe', 12.123);"),
-            Err(Error::ColumnDoesntExist("height".to_string()))
+
+        assert!(
+            sim.execute("insert into person (id, name, height) values (100, 'John Doe', 12.123);")
+                .is_err_and(|e| e == Error::ColumnDoesntExist("height".to_string()))
         );
     }
 
@@ -223,12 +207,13 @@ mod tests {
         sim.execute("create table person (id integer, name text);")
             .unwrap();
 
-        assert_eq!(
-            sim.execute("insert into person values (1, 'John'), ('bad_id', 'Jane'), (3, 'Bob')"),
-            Err(Error::TypeMismatch {
-                expected: SqlType::Integer,
-                got: SqlType::Text
-            })
+        assert!(
+            sim.execute("insert into person values (1, 'John'), ('bad_id', 'Jane'), (3, 'Bob')")
+                .is_err_and(|e| e
+                    == Error::TypeMismatch {
+                        expected: SqlType::Integer,
+                        got: SqlType::Text
+                    })
         )
     }
 
@@ -268,5 +253,34 @@ mod tests {
             sim.execute("insert into person (id, name) values (1, 'John')"),
             Err(Error::RequiredColumnMissing("weight".to_string()))
         );
+    }
+
+    #[test]
+    fn insert_resolved_inputs() {
+        let mut sim = Simulator::new(GenericDialect {});
+        sim.execute("create table person (id integer not null, name text not null, weight integer default 10)").unwrap();
+
+        let resolve = sim
+            .execute("insert into person (id, name) values(?, ?)")
+            .unwrap();
+
+        assert_eq!(resolve.inputs.len(), 2);
+        assert_eq!(resolve.get_input(0).unwrap(), &SqlType::Integer);
+        assert_eq!(resolve.get_input(1).unwrap(), &SqlType::Text);
+    }
+
+    #[test]
+    fn insert_resolved_inputs_numbered() {
+        let mut sim = Simulator::new(GenericDialect {});
+        sim.execute("create table person (id integer not null, name text not null, weight float default 10.2)").unwrap();
+
+        let resolve = sim
+            .execute("insert into person (id, name, weight) values($3, $1, $2)")
+            .unwrap();
+
+        assert_eq!(resolve.inputs.len(), 3);
+        assert_eq!(resolve.get_input(0).unwrap(), &SqlType::Text);
+        assert_eq!(resolve.get_input(1).unwrap(), &SqlType::Float);
+        assert_eq!(resolve.get_input(2).unwrap(), &SqlType::Integer);
     }
 }

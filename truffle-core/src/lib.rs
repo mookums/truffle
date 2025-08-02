@@ -10,6 +10,7 @@ pub use misc::config::Config;
 use misc::config::DialectKind;
 use misc::immutable::Immutable;
 
+use resolve::ResolvedQuery;
 pub use sqlparser::dialect::*;
 use sqlparser::{
     ast::{ObjectName, Statement},
@@ -110,7 +111,7 @@ impl Simulator {
     }
 
     /// Executes the given SQL in the Simulator and updates the state.
-    pub fn execute(&mut self, sql: impl AsRef<str>) -> Result<(), Error> {
+    pub fn execute(&mut self, sql: impl AsRef<str>) -> Result<ResolvedQuery, Error> {
         let parser = Parser::new(&**self.dialect);
         let statements = parser.try_with_sql(sql.as_ref())?.parse_statements()?;
 
@@ -118,8 +119,8 @@ impl Simulator {
             match statement {
                 Statement::CreateTable(create_table) => self.create_table(create_table)?,
                 // TODO: Support Alter Table
-                Statement::Query(query) => self.query(query)?,
-                Statement::Insert(insert) => self.insert(insert)?,
+                Statement::Query(query) => return self.query(query),
+                Statement::Insert(insert) => return self.insert(insert),
                 Statement::Delete(delete) => self.delete(delete)?,
                 Statement::Drop {
                     object_type, names, ..
@@ -128,7 +129,7 @@ impl Simulator {
             }
         }
 
-        Ok(())
+        Ok(ResolvedQuery::default())
     }
 }
 
