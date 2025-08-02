@@ -138,22 +138,23 @@ impl Simulator {
                 for context in &contexts {
                     for (col_ref, _) in context.refs.iter().unique_by(|r| *r.1) {
                         let column_name = &col_ref.name;
-                        let ty = inferrer.infer_qualified_type(
-                            self,
-                            &col_ref.qualifier,
-                            &col_ref.name,
-                        )?;
-
                         if all_columns.contains(column_name) {
                             return Err(Error::AmbiguousColumn(column_name.to_string()));
                         } else {
+                            let inferred_type = inferrer.infer_qualified_type(
+                                self,
+                                &col_ref.qualifier,
+                                &col_ref.name,
+                            )?;
+
                             resolved.insert_output(
                                 ResolveOutputKey::new(
                                     Some(col_ref.qualifier.clone()),
                                     col_ref.name.clone(),
                                 ),
-                                ty.clone(),
+                                inferred_type.clone(),
                             );
+
                             all_columns.insert(column_name.to_string());
                         }
                     }
@@ -163,17 +164,23 @@ impl Simulator {
                 for column in list.into_iter() {
                     match column {
                         SelectColumn::Unqualified(column) => {
-                            if inferrer.infer_unqualified_type(self, &column)?.is_none() {
+                            let Some(inferred_type) =
+                                inferrer.infer_unqualified_type(self, &column)?
+                            else {
                                 return Err(Error::ColumnDoesntExist(column));
-                            }
+                            };
+
+                            resolved
+                                .insert_output(ResolveOutputKey::new(None, column), inferred_type);
                         }
                         SelectColumn::Absolute { table, column } => {
-                            if !contexts
-                                .iter()
-                                .any(|c| c.has_column_in_table(&table, &column))
-                            {
-                                return Err(Error::ColumnDoesntExist(column));
-                            }
+                            let inferred_type =
+                                inferrer.infer_qualified_type(self, &table, &column)?;
+
+                            resolved.insert_output(
+                                ResolveOutputKey::new(Some(table), column),
+                                inferred_type,
+                            );
                         }
                         SelectColumn::Aliased { alias, column } => {
                             let table_name = contexts
@@ -185,9 +192,13 @@ impl Simulator {
                                 return Err(Error::TableDoesntExist(table_name.clone()));
                             }
 
-                            if !contexts.iter().any(|c| c.has_column(&column)) {
-                                return Err(Error::ColumnDoesntExist(column));
-                            }
+                            let inferred_type =
+                                inferrer.infer_qualified_type(self, table_name, &column)?;
+
+                            resolved.insert_output(
+                                ResolveOutputKey::new(Some(table_name.clone()), column),
+                                inferred_type,
+                            );
                         }
                         SelectColumn::AliasedWildcard(alias) => {
                             let table_name = contexts
@@ -198,6 +209,27 @@ impl Simulator {
                             if !contexts.iter().any(|c| c.has_table(table_name)) {
                                 return Err(Error::TableDoesntExist(table_name.clone()));
                             }
+
+                            for (col_ref, _) in contexts
+                                .iter()
+                                .filter(|c| c.has_table(table_name))
+                                .flat_map(|c| &c.refs)
+                                .unique_by(|r| r.1)
+                            {
+                                let inferred_type = inferrer.infer_qualified_type(
+                                    self,
+                                    &col_ref.qualifier,
+                                    &col_ref.name,
+                                )?;
+
+                                resolved.insert_output(
+                                    ResolveOutputKey::new(
+                                        Some(col_ref.qualifier.clone()),
+                                        col_ref.name.clone(),
+                                    ),
+                                    inferred_type.clone(),
+                                );
+                            }
                         }
                         SelectColumn::AbsoluteWildcard(table) => {
                             if !contexts
@@ -205,6 +237,27 @@ impl Simulator {
                                 .any(|c| c.refs.iter().any(|(r, _)| r.qualifier == table))
                             {
                                 return Err(Error::TableDoesntExist(table));
+                            }
+
+                            for (col_ref, _) in contexts
+                                .iter()
+                                .filter(|c| c.has_table(&table))
+                                .flat_map(|c| &c.refs)
+                                .unique_by(|r| r.1)
+                            {
+                                let inferred_type = inferrer.infer_qualified_type(
+                                    self,
+                                    &col_ref.qualifier,
+                                    &col_ref.name,
+                                )?;
+
+                                resolved.insert_output(
+                                    ResolveOutputKey::new(
+                                        Some(col_ref.qualifier.clone()),
+                                        col_ref.name.clone(),
+                                    ),
+                                    inferred_type.clone(),
+                                );
                             }
                         }
                     }
@@ -277,7 +330,7 @@ fn check_table_or_alias(ctx: &[JoinContext], name: &str) -> Result<TableOrAlias,
 
 #[cfg(test)]
 mod tests {
-    use crate::*;
+    use crate::{resolve::ResolveOutputKey, *};
 
     #[test]
     fn select_wildcard_success() {
@@ -1439,8 +1492,32 @@ mod tests {
         sim.execute("create table departments (id int primary key, emp_id int, dept_name text)")
             .unwrap();
 
-        sim.execute("select employees.name, departments.dept_name from employees right outer join departments on employees.id = departments.emp_id")
+        let resolved = sim.execute("select employees.name, departments.dept_name from employees right outer join departments on employees.id = departments.emp_id")
             .unwrap();
+
+        assert_eq!(resolved.inputs.len(), 0);
+        assert_eq!(resolved.outputs.len(), 2);
+
+        assert_eq!(resolved.get_output_with_name("name"), Some(&SqlType::Text));
+        assert_eq!(
+            resolved.get_output_with_name("dept_name"),
+            Some(&SqlType::Text)
+        );
+        assert_eq!(
+            resolved.get_output(&ResolveOutputKey::new(
+                Some("employees".to_string()),
+                "name"
+            )),
+            Some(&SqlType::Text)
+        );
+        assert_eq!(
+            resolved.get_output(&ResolveOutputKey::new(
+                Some("departments".to_string()),
+                "dept_name"
+            )),
+            Some(&SqlType::Text)
+        );
+        assert_eq!(resolved.get_output_with_name("emp_id"), None);
     }
 
     #[test]
@@ -1498,6 +1575,27 @@ mod tests {
 
     #[test]
     fn select_with_resolved_input_output() {
+        let mut sim = Simulator::new(GenericDialect {});
+        sim.execute("create table person (id integer not null, name text not null, weight float default 10.01)").unwrap();
+
+        let resolve = sim.execute("select * from person where id = $1").unwrap();
+
+        assert_eq!(resolve.inputs.len(), 1);
+        assert_eq!(resolve.get_input(0).unwrap(), &SqlType::Integer);
+
+        assert_eq!(resolve.outputs.len(), 3);
+        resolve
+            .output_iter()
+            .for_each(|(key, ty)| match key.name.as_ref() {
+                "id" => assert!(ty == &SqlType::Integer),
+                "name" => assert!(ty == &SqlType::Text),
+                "weight" => assert!(ty == &SqlType::Float),
+                _ => unreachable!(),
+            });
+    }
+
+    #[test]
+    fn select_with_resolved_input_output_joins() {
         let mut sim = Simulator::new(GenericDialect {});
         sim.execute("create table person (id integer not null, name text not null, weight float default 10.01)").unwrap();
 

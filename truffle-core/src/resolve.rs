@@ -4,6 +4,7 @@ use std::{
 };
 
 use crate::ty::SqlType;
+use itertools::Itertools;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
 pub struct ResolveOutputKey {
@@ -12,8 +13,11 @@ pub struct ResolveOutputKey {
 }
 
 impl ResolveOutputKey {
-    pub fn new(qualifier: Option<String>, name: String) -> Self {
-        Self { qualifier, name }
+    pub fn new(qualifier: Option<String>, name: impl ToString) -> Self {
+        Self {
+            qualifier: qualifier.map(|q| q.to_string()),
+            name: name.to_string(),
+        }
     }
 }
 
@@ -46,7 +50,25 @@ impl ResolvedQuery {
     }
 
     pub fn insert_output(&mut self, key: ResolveOutputKey, sql_type: SqlType) {
-        _ = self.outputs.insert(key.into(), sql_type)
+        _ = self.outputs.insert(key, sql_type)
+    }
+
+    pub fn get_output(&self, key: &ResolveOutputKey) -> Option<&SqlType> {
+        self.outputs.get(key)
+    }
+
+    /// This will attempt to match the name with the output columns.
+    ///
+    /// If there are multiple output columns with the same name, it will return None.
+    /// If there are no output columns with the name, it will return None.
+    pub fn get_output_with_name(&self, name: impl AsRef<str>) -> Option<&SqlType> {
+        self.outputs
+            .iter()
+            .filter(|o| o.0.name == name.as_ref())
+            .at_most_one()
+            .ok()
+            .flatten()
+            .map(|c| c.1)
     }
 
     pub fn output_iter(&self) -> hash_map::Iter<'_, ResolveOutputKey, SqlType> {
