@@ -1,5 +1,5 @@
 use std::{fs, path::Path};
-use truffle::config::Config;
+use truffle::Config;
 
 pub fn load_config() -> Result<Config, String> {
     let manifest_str = std::env::var("CARGO_MANIFEST_DIR").unwrap();

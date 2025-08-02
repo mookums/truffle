@@ -3,7 +3,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use truffle::{Simulator, config::Config};
+use truffle::{Config, Simulator};
 
 pub fn load_migrations(config: &Config) -> Result<Vec<(PathBuf, String)>, String> {
     let manifest_str = std::env::var("CARGO_MANIFEST_DIR").unwrap();

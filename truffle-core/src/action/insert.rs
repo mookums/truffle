@@ -1,13 +1,14 @@
-use sqlparser::ast::{Insert, SetExpr, TableObject};
+use sqlparser::ast::{Expr, Insert, SetExpr, TableObject, Value, ValueWithSpan};
 
 use crate::{
     Error, Simulator,
     expr::{ColumnInferrer, InferType},
     object_name_to_strings,
+    resolve::ResolvedQuery,
 };
 
 impl Simulator {
-    pub(crate) fn insert(&self, ins: Insert) -> Result<(), Error> {
+    pub(crate) fn insert(&self, ins: Insert) -> Result<ResolvedQuery, Error> {
         let TableObject::TableName(table_object_name) = ins.table else {
             todo!();
         };
@@ -30,6 +31,9 @@ impl Simulator {
 
             provided_columns.push(column_name);
         }
+
+        // This stores the return information for this query.
+        let mut resolved = ResolvedQuery::default();
 
         let inferrer = InsertInferrer::default();
 
@@ -56,6 +60,19 @@ impl Simulator {
                         if provided_columns.is_empty() {
                             // Implicit (Table Index) Columns.
                             let expr = &row[i];
+
+                            if let Expr::Value(ValueWithSpan {
+                                value: Value::Placeholder(placeholder),
+                                ..
+                            }) = expr
+                            {
+                                resolved.inputs.insert_before(
+                                    i,
+                                    placeholder.to_string(),
+                                    column.clone(),
+                                );
+                            }
+
                             _ = self.infer_expr_type(
                                 expr,
                                 InferType::Required(column.ty.clone()),
@@ -66,6 +83,18 @@ impl Simulator {
                         {
                             // If the column was named explicitly...
                             let expr = &row[index];
+
+                            if let Expr::Value(ValueWithSpan {
+                                value: Value::Placeholder(placeholder),
+                                ..
+                            }) = expr
+                            {
+                                resolved.inputs.insert_before(
+                                    i,
+                                    placeholder.to_string(),
+                                    column.clone(),
+                                );
+                            }
 
                             _ = self.infer_expr_type(
                                 expr,
@@ -82,7 +111,11 @@ impl Simulator {
             _ => todo!(),
         }
 
-        Ok(())
+        if let Some(_returning) = ins.returning {
+            // TODO: properly parsing what fields we are returning.
+        }
+
+        Ok(resolved)
     }
 }
 
