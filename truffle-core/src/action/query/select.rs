@@ -6,7 +6,8 @@ use sqlparser::ast::{Expr, Select, SelectItem, SelectItemQualifiedWildcardKind, 
 use crate::{
     Error, Simulator,
     action::join::{JoinContext, JoinInferrer},
-    expr::{ExprFlow, InferType},
+    column::Column,
+    expr::InferType,
     object_name_to_strings,
     resolve::{ResolveOutputKey, ResolvedQuery},
     ty::SqlType,
@@ -59,6 +60,10 @@ impl Simulator {
         let inferrer = JoinInferrer {
             join_contexts: &contexts,
         };
+
+        for context in contexts.iter() {
+            eprintln!("{context:?}")
+        }
 
         for projection in &sel.projection {
             match projection {
@@ -175,11 +180,7 @@ impl Simulator {
                             );
                         }
                         SelectColumn::Absolute { table, column } => {
-                            let true_column = contexts
-                                .iter()
-                                .filter_map(|c| c.get_qualified_column(&table, &column).transpose())
-                                .exactly_one()
-                                .map_err(|_| Error::ColumnDoesntExist(column.to_string()))??;
+                            let true_column = find_qualified_column(&contexts, &table, &column)?;
 
                             resolved.insert_output(
                                 ResolveOutputKey::new(Some(table), column),
@@ -187,81 +188,72 @@ impl Simulator {
                             );
                         }
                         SelectColumn::Aliased { alias, column } => {
-                            let table_name = contexts
-                                .iter()
-                                .find_map(|c| c.aliases.get(&alias))
-                                .ok_or(Error::AliasDoesntExist(alias))?;
+                            let table_name = resolve_alias(&contexts, &alias)?;
 
                             if !contexts.iter().any(|c| c.has_table(table_name)) {
-                                return Err(Error::TableDoesntExist(table_name.clone()));
+                                return Err(Error::TableDoesntExist(table_name.to_string()));
                             }
 
-                            // let inferred_type =
-                            //     inferrer.infer_qualified_type(self, table_name, &column)?;
+                            let true_column =
+                                find_qualified_column(&contexts, table_name, &column)?;
 
-                            // resolved.insert_output(
-                            //     ResolveOutputKey::new(Some(table_name.clone()), column),
-                            //     inferred_type,
-                            // );
+                            resolved.insert_output(
+                                ResolveOutputKey::new(Some(table_name.to_string()), column),
+                                true_column.clone(),
+                            );
                         }
                         SelectColumn::AliasedWildcard(alias) => {
-                            let table_name = contexts
-                                .iter()
-                                .find_map(|c| c.aliases.get(&alias))
-                                .ok_or(Error::AliasDoesntExist(alias))?;
+                            let table_name = resolve_alias(&contexts, &alias)?;
 
                             if !contexts.iter().any(|c| c.has_table(table_name)) {
-                                return Err(Error::TableDoesntExist(table_name.clone()));
+                                return Err(Error::TableDoesntExist(table_name.to_string()));
                             }
 
-                            for (col_ref, _) in contexts
-                                .iter()
-                                .filter(|c| c.has_table(table_name))
-                                .flat_map(|c| &c.refs)
-                                .unique_by(|r| r.1)
-                            {
-                                // let inferred_type = inferrer.infer_qualified_type(
-                                //     self,
-                                //     &col_ref.qualifier,
-                                //     &col_ref.name,
-                                // )?;
+                            for context in contexts.iter().filter(|c| c.has_table(table_name)) {
+                                for (col_ref, _) in context
+                                    .refs
+                                    .iter()
+                                    .filter(|r| r.0.qualifier == table_name)
+                                    .unique_by(|r| r.1)
+                                {
+                                    let true_column = context
+                                        .get_qualified_column(&col_ref.qualifier, &col_ref.name)?
+                                        .unwrap();
 
-                                // resolved.insert_output(
-                                //     ResolveOutputKey::new(
-                                //         Some(col_ref.qualifier.clone()),
-                                //         col_ref.name.clone(),
-                                //     ),
-                                //     inferred_type.clone(),
-                                // );
+                                    resolved.insert_output(
+                                        ResolveOutputKey::new(
+                                            Some(col_ref.qualifier.clone()),
+                                            col_ref.name.clone(),
+                                        ),
+                                        true_column.clone(),
+                                    );
+                                }
                             }
                         }
                         SelectColumn::AbsoluteWildcard(table) => {
-                            if !contexts
-                                .iter()
-                                .any(|c| c.refs.iter().any(|(r, _)| r.qualifier == table))
-                            {
-                                return Err(Error::TableDoesntExist(table));
+                            if !contexts.iter().any(|c| c.has_table(&table)) {
+                                return Err(Error::TableDoesntExist(table.clone()));
                             }
 
-                            for (col_ref, _) in contexts
-                                .iter()
-                                .filter(|c| c.has_table(&table))
-                                .flat_map(|c| &c.refs)
-                                .unique_by(|r| r.1)
-                            {
-                                // let inferred_type = inferrer.infer_qualified_type(
-                                //     self,
-                                //     &col_ref.qualifier,
-                                //     &col_ref.name,
-                                // )?;
+                            for context in contexts.iter().filter(|c| c.has_table(&table)) {
+                                for (col_ref, _) in context
+                                    .refs
+                                    .iter()
+                                    .filter(|r| r.0.qualifier == table)
+                                    .unique_by(|r| r.1)
+                                {
+                                    let true_column = context
+                                        .get_qualified_column(&col_ref.qualifier, &col_ref.name)?
+                                        .unwrap();
 
-                                // resolved.insert_output(
-                                //     ResolveOutputKey::new(
-                                //         Some(col_ref.qualifier.clone()),
-                                //         col_ref.name.clone(),
-                                //     ),
-                                //     inferred_type.clone(),
-                                // );
+                                    resolved.insert_output(
+                                        ResolveOutputKey::new(
+                                            Some(col_ref.qualifier.clone()),
+                                            col_ref.name.clone(),
+                                        ),
+                                        true_column.clone(),
+                                    );
+                                }
                             }
                         }
                     }
@@ -276,11 +268,43 @@ impl Simulator {
                 InferType::Required(SqlType::Boolean),
                 &inferrer,
                 &mut resolved,
-                ExprFlow::Input,
             )?;
         }
 
         Ok(resolved)
+    }
+}
+
+fn resolve_alias<'a>(contexts: &'a [JoinContext], alias: &str) -> Result<&'a str, Error> {
+    contexts
+        .iter()
+        .filter_map(|c| c.aliases.get(alias))
+        .at_most_one()
+        .map_err(|_| Error::AmbiguousAlias(alias.to_string()))?
+        .ok_or_else(|| Error::AliasDoesntExist(alias.to_string()))
+        .map(|x| x.as_str())
+}
+
+fn find_qualified_column<'a>(
+    contexts: &'a [JoinContext],
+    table: &str,
+    column: &str,
+) -> Result<&'a Column, Error> {
+    let matches: Vec<_> = contexts
+        .iter()
+        .filter_map(|c| c.get_qualified_column(table, column).ok().flatten())
+        .collect();
+
+    match matches.len() {
+        0 => Err(Error::ColumnDoesntExist(column.to_string())),
+        1 => Ok(matches[0]),
+        _ => {
+            if matches.iter().all_equal() {
+                Ok(matches[0])
+            } else {
+                Err(Error::AmbiguousColumn(column.to_string()))
+            }
+        }
     }
 }
 
@@ -1096,8 +1120,24 @@ mod tests {
         sim.execute("create table order (id int primary key, total float)")
             .unwrap();
 
-        sim.execute("select * from person natural join order")
+        let resolve = sim
+            .execute("select * from person natural join order")
             .unwrap();
+
+        assert_eq!(resolve.inputs.len(), 0);
+        assert_eq!(resolve.outputs.len(), 3);
+        assert_eq!(
+            resolve.get_output_with_name("id").map(|c| &c.ty),
+            Some(&SqlType::Integer)
+        );
+        assert_eq!(
+            resolve.get_output_with_name("name").map(|c| &c.ty),
+            Some(&SqlType::Text)
+        );
+        assert_eq!(
+            resolve.get_output_with_name("total").map(|c| &c.ty),
+            Some(&SqlType::Float)
+        );
     }
 
     #[test]
@@ -1600,6 +1640,42 @@ mod tests {
     }
 
     #[test]
+    fn select_ambiguous_alias_in_join() {
+        let mut sim = Simulator::new(GenericDialect {});
+        sim.execute("create table table1 (id int primary key, name text)")
+            .unwrap();
+        sim.execute("create table table2 (id int primary key, value text)")
+            .unwrap();
+
+        assert_eq!(
+            sim.execute(
+                "select t.* from table1 t left outer join table2 t on table1.id = table2.id"
+            ),
+            Err(Error::AmbiguousAlias("t".to_string()))
+        );
+    }
+
+    #[test]
+    fn select_ambiguous_alias_across_joins() {
+        let mut sim = Simulator::new(GenericDialect {});
+        sim.execute("create table table1 (id int primary key, name text)")
+            .unwrap();
+        sim.execute("create table table2 (id int primary key, value text)")
+            .unwrap();
+
+        assert_eq!(
+            sim.execute(
+                r#"
+                select t.*
+                from table1 t left outer join table2 t on table1.id = table2.id,
+                table2 t natural join table1
+                "#
+            ),
+            Err(Error::AmbiguousAlias("t".to_string()))
+        );
+    }
+
+    #[test]
     fn select_with_resolved_input_output() {
         let mut sim = Simulator::new(GenericDialect {});
         sim.execute("create table person (id integer not null, name text not null, weight float default 10.01)").unwrap();
@@ -1641,5 +1717,30 @@ mod tests {
                 "weight" => assert!(ty == &SqlType::Float),
                 _ => unreachable!(),
             });
+    }
+
+    #[test]
+    fn select_with_resolved_input_output_aliased_wildcard() {
+        let mut sim = Simulator::new(GenericDialect {});
+        sim.execute("create table products (id int primary key, name text)")
+            .unwrap();
+        sim.execute("create table inventory (id int primary key, quantity int)")
+            .unwrap();
+
+        let resolve = sim
+            .execute("select products.* from products natural right join inventory")
+            .unwrap();
+
+        assert_eq!(resolve.inputs.len(), 0);
+
+        assert_eq!(resolve.outputs.len(), 2);
+        assert_eq!(
+            resolve.get_output_with_name("id").map(|c| &c.ty),
+            Some(&SqlType::Integer)
+        );
+        assert_eq!(
+            resolve.get_output_with_name("name").map(|c| &c.ty),
+            Some(&SqlType::Text)
+        );
     }
 }

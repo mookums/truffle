@@ -2,7 +2,7 @@ use sqlparser::ast::{Insert, SetExpr, TableObject};
 
 use crate::{
     Error, Simulator,
-    expr::{ColumnInferrer, ExprFlow, InferType},
+    expr::{ColumnInferrer, InferType},
     object_name_to_strings,
     resolve::ResolvedQuery,
 };
@@ -65,7 +65,6 @@ impl Simulator {
                                 InferType::Required(column.ty.clone()),
                                 &inferrer,
                                 &mut resolved,
-                                ExprFlow::Input,
                             )?;
                         } else if let Some(index) =
                             provided_columns.iter().position(|pc| pc == column_name)
@@ -78,7 +77,6 @@ impl Simulator {
                                 InferType::Required(column.ty.clone()),
                                 &inferrer,
                                 &mut resolved,
-                                ExprFlow::Input,
                             )?;
                         } else if !(column.nullable || column.default) {
                             // If the column was not named explicitly, we check it.

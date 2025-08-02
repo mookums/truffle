@@ -1,11 +1,7 @@
 use sqlparser::ast::{Delete, FromTable, TableFactor};
 
 use crate::{
-    Error, Simulator,
-    expr::{ExprFlow, InferType},
-    object_name_to_strings,
-    resolve::ResolvedQuery,
-    ty::SqlType,
+    Error, Simulator, expr::InferType, object_name_to_strings, resolve::ResolvedQuery, ty::SqlType,
 };
 
 use super::join::JoinInferrer;
@@ -44,7 +40,6 @@ impl Simulator {
                         from_table_alias.as_ref(),
                         &from.joins,
                         &mut resolved,
-                        ExprFlow::Input,
                     )?;
 
                     contexts.push(join_table);
@@ -67,7 +62,6 @@ impl Simulator {
                 InferType::Required(SqlType::Boolean),
                 &inferrer,
                 &mut resolved,
-                ExprFlow::Input,
             )?;
 
             if ty != SqlType::Boolean {

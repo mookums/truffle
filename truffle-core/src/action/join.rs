@@ -6,7 +6,7 @@ use sqlparser::ast::{Join, JoinConstraint, JoinOperator, TableFactor};
 use crate::{
     Error, Simulator,
     column::Column,
-    expr::{ColumnInferrer, ExprFlow, InferType},
+    expr::{ColumnInferrer, InferType},
     object_name_to_strings,
     resolve::ResolvedQuery,
     table::Table,
@@ -124,7 +124,6 @@ impl Simulator {
                     InferType::Required(SqlType::Boolean),
                     &inferrer,
                     resolved,
-                    ExprFlow::Input,
                 )?;
 
                 if ty != SqlType::Boolean {
@@ -157,10 +156,8 @@ impl Simulator {
                         .map_err(|_| Error::AmbiguousColumn(column_name.to_string()))?
                     {
                         let table_name = &col_ref.qualifier;
-                        let column = self
-                            .get_table(table_name)
-                            .unwrap()
-                            .get_column(column_name)
+                        let column = join_ctx
+                            .get_qualified_column(table_name, column_name)?
                             .unwrap();
 
                         Some(column.ty.clone())
@@ -203,10 +200,8 @@ impl Simulator {
                     let column_name = &col_ref.name;
 
                     if let Some(right_column) = right_table.get_column(column_name) {
-                        let column = self
-                            .get_table(table_name)
-                            .unwrap()
-                            .get_column(column_name)
+                        let column = join_ctx
+                            .get_qualified_column(table_name, column_name)?
                             .unwrap();
 
                         // Check if types match
@@ -261,6 +256,7 @@ impl ColumnRef {
     }
 }
 
+#[derive(Debug)]
 pub struct JoinContext {
     // Maps the alias to the table name
     pub aliases: HashMap<String, String>,
@@ -402,7 +398,14 @@ impl JoinContext {
         }
 
         if let Some(alias) = alias {
-            self.aliases.insert(alias.to_string(), name.to_string());
+            // Ensure we don't have duplicate aliases.
+            if self
+                .aliases
+                .insert(alias.to_string(), name.to_string())
+                .is_some()
+            {
+                return Err(Error::AmbiguousAlias(alias.to_string()));
+            }
         }
 
         Ok(())

@@ -4,7 +4,7 @@ use tracing::debug;
 use crate::{
     Error, Simulator,
     column::Column,
-    expr::{ColumnInferrer, ExprFlow, InferType},
+    expr::{ColumnInferrer, InferType},
     object_name_to_strings,
     resolve::ResolvedQuery,
     table::{Constraint, Table},
@@ -45,7 +45,6 @@ impl Simulator {
                             InferType::Required(ty.clone()),
                             &inferrer,
                             &mut resolved,
-                            ExprFlow::Input,
                         )?;
 
                         default = true;
