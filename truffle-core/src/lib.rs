@@ -1,13 +1,15 @@
 mod action;
 mod column;
-pub mod config;
 mod expr;
-mod immutable;
+mod misc;
+mod resolve;
 mod table;
 mod ty;
 
-use config::{Config, DialectKind};
-use immutable::Immutable;
+pub use misc::config::Config;
+use misc::config::DialectKind;
+use misc::immutable::Immutable;
+
 pub use sqlparser::dialect::*;
 use sqlparser::{
     ast::{ObjectName, Statement},
