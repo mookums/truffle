@@ -1,4 +1,4 @@
-use sqlparser::ast::{Expr, Insert, SetExpr, TableObject, Value, ValueWithSpan};
+use sqlparser::ast::{Insert, SetExpr, TableObject};
 
 use crate::{
     Error, Simulator,
