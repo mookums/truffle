@@ -355,6 +355,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "uuid")]
     fn create_table_columns() {
         let mut sim = Simulator::new(GenericDialect {});
         sim.execute("create table person (id uuid, name text, weight real);")
@@ -440,6 +441,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "uuid")]
     fn create_table_with_col_foreign_key_type_mismatch() {
         let mut sim = Simulator::new(GenericDialect {});
         sim.execute("create table person (id uuid primary key, name text unique, phone int);")
@@ -527,6 +529,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "uuid")]
     fn create_table_with_table_foreign_key_type_mismatch() {
         let mut sim = Simulator::new(GenericDialect {});
         sim.execute("create table person (id uuid primary key, name text unique, phone int);")

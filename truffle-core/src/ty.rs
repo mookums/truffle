@@ -29,12 +29,22 @@ pub enum SqlType {
     Text,
 
     Boolean,
+
+    #[cfg(feature = "time")]
     Date,
+    #[cfg(feature = "time")]
     Time,
+    #[cfg(feature = "time")]
     Timestamp,
+    #[cfg(feature = "time")]
     TimestampTz,
+
+    #[cfg(feature = "uuid")]
     Uuid,
+
+    #[cfg(feature = "json")]
     Json,
+
     Unknown(String),
 }
 
@@ -77,11 +87,17 @@ impl From<DataType> for SqlType {
             DataType::Double(_) | DataType::Float8 => SqlType::Double,
             DataType::Text | DataType::String(_) => SqlType::Text,
             DataType::Bool | DataType::Boolean => SqlType::Boolean,
+            #[cfg(feature = "time")]
             DataType::Date => SqlType::Date,
+            #[cfg(feature = "time")]
             DataType::Timestamp(_, _) | DataType::Datetime(_) => SqlType::TimestampTz,
+            #[cfg(feature = "time")]
             DataType::TimestampNtz => SqlType::Timestamp,
+            #[cfg(feature = "time")]
             DataType::Time(_, _) => SqlType::Time,
+            #[cfg(feature = "uuid")]
             DataType::Uuid => SqlType::Uuid,
+            #[cfg(feature = "json")]
             DataType::JSON => SqlType::Json,
             _ => SqlType::Unknown(value.to_string()),
         }

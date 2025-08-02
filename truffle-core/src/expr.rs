@@ -1,5 +1,6 @@
-use serde::de::IgnoredAny;
 use sqlparser::ast::{BinaryOperator, CastKind, Expr, UnaryOperator, Value};
+
+#[cfg(feature = "time")]
 use time::{
     Date, OffsetDateTime, PrimitiveDateTime, Time,
     format_description::{
@@ -7,7 +8,6 @@ use time::{
         well_known::{Iso8601, Rfc3339},
     },
 };
-use uuid::Uuid;
 
 use crate::{Error, Simulator, ty::SqlType};
 
@@ -210,6 +210,8 @@ impl Simulator {
                     Err(Error::Sql("Number is too big".to_string()))
                 }
             }
+
+            #[allow(unused_variables)]
             Value::SingleQuotedString(str)
             | Value::SingleQuotedByteStringLiteral(str)
             | Value::DoubleQuotedByteStringLiteral(str)
@@ -218,6 +220,7 @@ impl Simulator {
             | Value::DoubleQuotedString(str) => {
                 if let InferType::Required(expected_ty) = expected {
                     match expected_ty {
+                        #[cfg(feature = "time")]
                         SqlType::Timestamp => {
                             let format = format_description::parse(
                                 "[year]-[month]-[day] [hour]:[minute]:[second]",
@@ -227,6 +230,7 @@ impl Simulator {
                                 return Ok(SqlType::Timestamp);
                             }
                         }
+                        #[cfg(feature = "time")]
                         SqlType::TimestampTz => {
                             if OffsetDateTime::parse(str, &Iso8601::DEFAULT).is_ok() {
                                 return Ok(SqlType::TimestampTz);
@@ -236,23 +240,27 @@ impl Simulator {
                                 return Ok(SqlType::TimestampTz);
                             }
                         }
+                        #[cfg(feature = "time")]
                         SqlType::Time => {
                             if Time::parse(str, &Iso8601::DEFAULT).is_ok() {
                                 return Ok(SqlType::Time);
                             }
                         }
+                        #[cfg(feature = "time")]
                         SqlType::Date => {
                             if Date::parse(str, &Iso8601::DEFAULT).is_ok() {
                                 return Ok(SqlType::Date);
                             }
                         }
+                        #[cfg(feature = "uuid")]
                         SqlType::Uuid => {
-                            if Uuid::parse_str(str).is_ok() {
+                            if uuid::Uuid::parse_str(str).is_ok() {
                                 return Ok(SqlType::Uuid);
                             }
                         }
+                        #[cfg(feature = "json")]
                         SqlType::Json => {
-                            if serde_json::from_str::<IgnoredAny>(str).is_ok() {
+                            if serde_json::from_str::<serde::de::IgnoredAny>(str).is_ok() {
                                 return Ok(SqlType::Json);
                             }
                         }

@@ -1,10 +1,7 @@
 use std::collections::HashSet;
 
 use itertools::Itertools;
-use sqlparser::{
-    ast::{Expr, Select, SelectItem, SelectItemQualifiedWildcardKind, TableFactor},
-    dialect::Dialect,
-};
+use sqlparser::ast::{Expr, Select, SelectItem, SelectItemQualifiedWildcardKind, TableFactor};
 
 use crate::{
     Error, Simulator,
