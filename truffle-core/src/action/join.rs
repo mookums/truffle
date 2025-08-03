@@ -157,7 +157,6 @@ impl Simulator {
                     let left_ty = if let Some((col_ref, _)) = join_ctx
                         .refs
                         .iter()
-                        // .unique_by(|(_, idx)| *idx)
                         .filter(|(r, _)| &r.name == column_name)
                         .at_most_one()
                         .map_err(|_| Error::AmbiguousColumn(column_name.to_string()))?
