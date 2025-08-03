@@ -61,10 +61,6 @@ impl Simulator {
             join_contexts: &contexts,
         };
 
-        for context in contexts.iter() {
-            eprintln!("{context:?}")
-        }
-
         for projection in &sel.projection {
             match projection {
                 SelectItem::UnnamedExpr(expr) => match expr {
@@ -149,14 +145,6 @@ impl Simulator {
                 for column in list.into_iter() {
                     match column {
                         SelectColumn::Unqualified(column) => {
-                            eprintln!(
-                                "Columns with this Name: {}",
-                                contexts
-                                    .iter()
-                                    .filter(|c| c.get_column(&column).is_ok_and(|d| d.is_some()))
-                                    .count()
-                            );
-
                             let true_column = contexts
                                 .iter()
                                 .filter_map(|c| c.get_column(&column).transpose())
@@ -292,7 +280,7 @@ fn check_qualifier(ctx: &[JoinContext], name: &str) -> Result<(), Error> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{resolve::ResolveOutputKey, *};
+    use crate::*;
 
     #[test]
     fn select_wildcard_success() {
@@ -1500,20 +1488,12 @@ mod tests {
             Some(&SqlType::Text)
         );
         assert_eq!(
-            resolved
-                .get_output(&ResolveOutputKey::new(
-                    Some("employees".to_string()),
-                    "name"
-                ))
-                .map(|c| &c.ty),
+            resolved.get_output("employees", "name").map(|c| &c.ty),
             Some(&SqlType::Text)
         );
         assert_eq!(
             resolved
-                .get_output(&ResolveOutputKey::new(
-                    Some("departments".to_string()),
-                    "dept_name"
-                ))
+                .get_output("departments", "dept_name")
                 .map(|c| &c.ty),
             Some(&SqlType::Text)
         );
@@ -1695,5 +1675,21 @@ mod tests {
             "#,
             )
             .unwrap();
+
+        assert_eq!(resolve.inputs.len(), 0);
+
+        assert_eq!(resolve.outputs.len(), 3);
+        assert_eq!(
+            resolve.get_output("p1", "name").map(|r| &r.ty),
+            Some(&SqlType::Text)
+        );
+        assert_eq!(
+            resolve.get_output("p2", "name").map(|r| &r.ty),
+            Some(&SqlType::Text)
+        );
+        assert_eq!(
+            resolve.get_output("p1", "age").map(|r| &r.ty),
+            Some(&SqlType::Integer)
+        );
     }
 }

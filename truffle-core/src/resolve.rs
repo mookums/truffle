@@ -89,8 +89,11 @@ impl ResolvedQuery {
         _ = self.outputs.insert(key, col)
     }
 
-    pub fn get_output(&self, key: &ResolveOutputKey) -> Option<&Column> {
-        self.outputs.get(key)
+    pub fn get_output(&self, qualifier: impl ToString, column: impl ToString) -> Option<&Column> {
+        self.outputs.get(&ResolveOutputKey {
+            qualifier: Some(qualifier.to_string()),
+            name: column.to_string(),
+        })
     }
 
     /// This will attempt to match the name with the output columns.
