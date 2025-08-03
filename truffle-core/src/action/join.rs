@@ -310,7 +310,6 @@ impl JoinContext {
 
         match kind {
             JoinKind::Cross => {
-                eprintln!("JOIN table columns: {columns:?}");
                 // add all columns from the right to the left
                 for (column_name, column) in columns.iter() {
                     let existing_column_rc = self
