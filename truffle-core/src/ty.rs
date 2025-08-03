@@ -7,7 +7,7 @@ use sqlparser::ast::DataType;
 use serde::{Deserialize, Serialize};
 
 #[cfg_attr(feature = "serde", derive(Deserialize, Serialize))]
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum SqlType {
     // NULL
     Null,

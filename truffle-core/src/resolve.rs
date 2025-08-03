@@ -1,5 +1,6 @@
 use std::{
     collections::{HashMap, hash_map},
+    fmt::Display,
     slice,
 };
 
@@ -21,10 +22,45 @@ impl ResolveOutputKey {
     }
 }
 
+impl Display for ResolveOutputKey {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match &self.qualifier {
+            Some(qualifier) => write!(f, "{}.{}", qualifier, self.name),
+            None => write!(f, "{}", self.name),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ResolvedQuery {
     pub inputs: Vec<SqlType>,
     pub outputs: HashMap<ResolveOutputKey, Column>,
+}
+
+impl Display for ResolvedQuery {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Format inputs
+        writeln!(f, "Inputs:")?;
+        if self.inputs.is_empty() {
+            writeln!(f, "  (none)")?;
+        } else {
+            for (i, input) in self.inputs.iter().enumerate() {
+                writeln!(f, "  ${}: {}", i + 1, input)?;
+            }
+        }
+
+        // Format outputs
+        writeln!(f, "Outputs:")?;
+        if self.outputs.is_empty() {
+            writeln!(f, "  (none)")?;
+        } else {
+            for (key, column) in &self.outputs {
+                writeln!(f, "  {key}: {column}")?;
+            }
+        }
+
+        Ok(())
+    }
 }
 
 impl ResolvedQuery {

@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::{collections::HashSet, rc::Rc};
 
 use itertools::Itertools;
 use sqlparser::ast::{Expr, Select, SelectItem, SelectItemQualifiedWildcardKind, TableFactor};
@@ -76,23 +76,14 @@ impl Simulator {
                             .push(SelectColumn::Unqualified(value));
                     }
                     Expr::CompoundIdentifier(idents) => {
-                        let table_or_alias = &idents.first().unwrap().value;
+                        let qualifier = &idents.first().unwrap().value;
                         let column_name = &idents.get(1).unwrap().value;
 
-                        match check_table_or_alias(&contexts, table_or_alias)? {
-                            TableOrAlias::Table => {
-                                columns.expect_list_mut().push(SelectColumn::Absolute {
-                                    table: table_or_alias.to_string(),
-                                    column: column_name.to_string(),
-                                });
-                            }
-                            TableOrAlias::Alias => {
-                                columns.expect_list_mut().push(SelectColumn::Aliased {
-                                    alias: table_or_alias.to_string(),
-                                    column: column_name.to_string(),
-                                });
-                            }
-                        }
+                        check_qualifier(&contexts, qualifier)?;
+                        columns.expect_list_mut().push(SelectColumn::Qualified {
+                            qualifier: qualifier.to_string(),
+                            column: column_name.to_string(),
+                        });
                     }
                     _ => {
                         return Err(Error::Unsupported(format!(
@@ -107,20 +98,10 @@ impl Simulator {
                 }
                 SelectItem::QualifiedWildcard(kind, _) => match kind {
                     SelectItemQualifiedWildcardKind::ObjectName(name) => {
-                        let table_or_alias = object_name_to_strings(name).first().unwrap().clone();
-
-                        match check_table_or_alias(&contexts, &table_or_alias)? {
-                            TableOrAlias::Table => {
-                                columns
-                                    .expect_list_mut()
-                                    .push(SelectColumn::AbsoluteWildcard(table_or_alias));
-                            }
-                            TableOrAlias::Alias => {
-                                columns
-                                    .expect_list_mut()
-                                    .push(SelectColumn::AliasedWildcard(table_or_alias));
-                            }
-                        }
+                        let qualifier = object_name_to_strings(name).first().unwrap().clone();
+                        columns
+                            .expect_list_mut()
+                            .push(SelectColumn::Wildcard(qualifier));
                     }
                     SelectItemQualifiedWildcardKind::Expr(_) => {
                         return Err(Error::Unsupported(
@@ -140,7 +121,8 @@ impl Simulator {
                 let mut all_columns = HashSet::new();
 
                 for context in &contexts {
-                    for (col_ref, _) in context.refs.iter().unique_by(|r| *r.1) {
+                    // We are about if the Rcs are the same, not the underlying value.
+                    for (col_ref, _) in context.refs.iter().unique_by(|r| Rc::as_ptr(r.1)) {
                         let column_name = &col_ref.name;
                         if all_columns.contains(column_name) {
                             return Err(Error::AmbiguousColumn(column_name.to_string()));
@@ -167,6 +149,14 @@ impl Simulator {
                 for column in list.into_iter() {
                     match column {
                         SelectColumn::Unqualified(column) => {
+                            eprintln!(
+                                "Columns with this Name: {}",
+                                contexts
+                                    .iter()
+                                    .filter(|c| c.get_column(&column).is_ok_and(|d| d.is_some()))
+                                    .count()
+                            );
+
                             let true_column = contexts
                                 .iter()
                                 .filter_map(|c| c.get_column(&column).transpose())
@@ -179,41 +169,23 @@ impl Simulator {
                                 true_column.clone(),
                             );
                         }
-                        SelectColumn::Absolute { table, column } => {
-                            let true_column = find_qualified_column(&contexts, &table, &column)?;
-
-                            resolved.insert_output(
-                                ResolveOutputKey::new(Some(table), column),
-                                true_column.clone(),
-                            );
-                        }
-                        SelectColumn::Aliased { alias, column } => {
-                            let table_name = resolve_alias(&contexts, &alias)?;
-
-                            if !contexts.iter().any(|c| c.has_table(table_name)) {
-                                return Err(Error::TableDoesntExist(table_name.to_string()));
-                            }
-
+                        SelectColumn::Qualified { qualifier, column } => {
                             let true_column =
-                                find_qualified_column(&contexts, table_name, &column)?;
+                                find_qualified_column(&contexts, &qualifier, &column)?;
 
                             resolved.insert_output(
-                                ResolveOutputKey::new(Some(table_name.to_string()), column),
+                                ResolveOutputKey::new(Some(qualifier), column),
                                 true_column.clone(),
                             );
                         }
-                        SelectColumn::AliasedWildcard(alias) => {
-                            let table_name = resolve_alias(&contexts, &alias)?;
+                        SelectColumn::Wildcard(qualifier) => {
+                            let mut found = false;
 
-                            if !contexts.iter().any(|c| c.has_table(table_name)) {
-                                return Err(Error::TableDoesntExist(table_name.to_string()));
-                            }
-
-                            for context in contexts.iter().filter(|c| c.has_table(table_name)) {
+                            for context in contexts.iter().filter(|c| c.has_qualifier(&qualifier)) {
                                 for (col_ref, _) in context
                                     .refs
                                     .iter()
-                                    .filter(|r| r.0.qualifier == table_name)
+                                    .filter(|r| r.0.qualifier == qualifier)
                                     .unique_by(|r| r.1)
                                 {
                                     let true_column = context
@@ -227,33 +199,13 @@ impl Simulator {
                                         ),
                                         true_column.clone(),
                                     );
+
+                                    found = true;
                                 }
                             }
-                        }
-                        SelectColumn::AbsoluteWildcard(table) => {
-                            if !contexts.iter().any(|c| c.has_table(&table)) {
-                                return Err(Error::TableDoesntExist(table.clone()));
-                            }
 
-                            for context in contexts.iter().filter(|c| c.has_table(&table)) {
-                                for (col_ref, _) in context
-                                    .refs
-                                    .iter()
-                                    .filter(|r| r.0.qualifier == table)
-                                    .unique_by(|r| r.1)
-                                {
-                                    let true_column = context
-                                        .get_qualified_column(&col_ref.qualifier, &col_ref.name)?
-                                        .unwrap();
-
-                                    resolved.insert_output(
-                                        ResolveOutputKey::new(
-                                            Some(col_ref.qualifier.clone()),
-                                            col_ref.name.clone(),
-                                        ),
-                                        true_column.clone(),
-                                    );
-                                }
+                            if !found {
+                                return Err(Error::QualifierDoesntExist(qualifier.to_string()));
                             }
                         }
                     }
@@ -275,21 +227,11 @@ impl Simulator {
     }
 }
 
-fn resolve_alias<'a>(contexts: &'a [JoinContext], alias: &str) -> Result<&'a str, Error> {
-    contexts
-        .iter()
-        .filter_map(|c| c.aliases.get(alias))
-        .at_most_one()
-        .map_err(|_| Error::AmbiguousAlias(alias.to_string()))?
-        .ok_or_else(|| Error::AliasDoesntExist(alias.to_string()))
-        .map(|x| x.as_str())
-}
-
-fn find_qualified_column<'a>(
-    contexts: &'a [JoinContext],
+fn find_qualified_column(
+    contexts: &[JoinContext],
     table: &str,
     column: &str,
-) -> Result<&'a Column, Error> {
+) -> Result<Column, Error> {
     let matches: Vec<_> = contexts
         .iter()
         .filter_map(|c| c.get_qualified_column(table, column).ok().flatten())
@@ -297,10 +239,10 @@ fn find_qualified_column<'a>(
 
     match matches.len() {
         0 => Err(Error::ColumnDoesntExist(column.to_string())),
-        1 => Ok(matches[0]),
+        1 => Ok(matches.into_iter().next().unwrap()),
         _ => {
             if matches.iter().all_equal() {
-                Ok(matches[0])
+                Ok(matches.into_iter().next().unwrap())
             } else {
                 Err(Error::AmbiguousColumn(column.to_string()))
             }
@@ -308,6 +250,7 @@ fn find_qualified_column<'a>(
     }
 }
 
+#[derive(Debug)]
 pub enum SelectColumns {
     /// Selects all columns across the FROM clause.
     Wildcard,
@@ -325,34 +268,25 @@ impl SelectColumns {
     }
 }
 
+#[derive(Debug)]
 pub enum SelectColumn {
     /// This is the true name of the column.
     Unqualified(String),
-    /// This is an absolute qualified (eg. table.col)
-    Absolute { table: String, column: String },
-    /// Aliased (eg.p.col) where p is mapped to a table later
-    Aliased { alias: String, column: String },
-    /// This is a qualified wildcard that uses the table name.
-    AbsoluteWildcard(String),
-    /// This is a wildcard that uses a table alias.
-    AliasedWildcard(String),
+    Qualified {
+        qualifier: String,
+        column: String,
+    },
+    Wildcard(String),
 }
 
-enum TableOrAlias {
-    Table,
-    Alias,
-}
-
-fn check_table_or_alias(ctx: &[JoinContext], name: &str) -> Result<TableOrAlias, Error> {
+fn check_qualifier(ctx: &[JoinContext], name: &str) -> Result<(), Error> {
     if ctx
         .iter()
         .any(|c| c.refs.iter().any(|(r, _)| r.qualifier == name))
     {
-        Ok(TableOrAlias::Table)
-    } else if ctx.iter().any(|c| c.aliases.contains_key(name)) {
-        Ok(TableOrAlias::Alias)
+        Ok(())
     } else {
-        Err(Error::TableOrAliasDoesntExist(name.to_string()))
+        Err(Error::QualifierDoesntExist(name.to_string()))
     }
 }
 
@@ -493,7 +427,7 @@ mod tests {
 
         assert_eq!(
             sim.execute("select unknown_table.id from person"),
-            Err(Error::TableOrAliasDoesntExist("unknown_table".to_string()))
+            Err(Error::QualifierDoesntExist("unknown_table".to_string()))
         );
     }
 
@@ -508,7 +442,7 @@ mod tests {
 
         assert_eq!(
             sim.execute("select order.id from person"),
-            Err(Error::TableOrAliasDoesntExist("order".to_string()))
+            Err(Error::QualifierDoesntExist("order".to_string()))
         );
     }
 
@@ -554,7 +488,7 @@ mod tests {
 
         assert_eq!(
             sim.execute("select unknown.* from person"),
-            Err(Error::TableOrAliasDoesntExist("unknown".to_string()))
+            Err(Error::QualifierDoesntExist("unknown".to_string()))
         );
     }
 
@@ -568,7 +502,7 @@ mod tests {
 
         assert_eq!(
             sim.execute("select orders.* from person"),
-            Err(Error::TableOrAliasDoesntExist("orders".to_string()))
+            Err(Error::QualifierDoesntExist("orders".to_string()))
         );
     }
 
@@ -1255,7 +1189,7 @@ mod tests {
 
         assert_eq!(
             sim.execute("select id, x, y, z, v.id from a natural join b natural join c"),
-            Err(Error::TableOrAliasDoesntExist("v".to_string()))
+            Err(Error::QualifierDoesntExist("v".to_string()))
         )
     }
 
@@ -1278,10 +1212,10 @@ mod tests {
         sim.execute("create table table2 (id int, value text)")
             .unwrap();
 
-        assert!(matches!(
+        assert_eq!(
             sim.execute("select * from table1 join table2"),
-            Err(Error::AmbiguousColumn(_))
-        ));
+            Err(Error::AmbiguousColumn("id".to_string()))
+        );
     }
 
     #[test]
@@ -1742,5 +1676,24 @@ mod tests {
             resolve.get_output_with_name("name").map(|c| &c.ty),
             Some(&SqlType::Text)
         );
+    }
+
+    #[test]
+    fn select_with_resolved_input_output_self_join() {
+        let mut sim = Simulator::new(GenericDialect {});
+        sim.execute(
+            "create table person (id int primary key, name text not null, age int default 20)",
+        )
+        .unwrap();
+
+        let resolve = sim
+            .execute(
+                r#"
+                select p1.name, p2.name, p1.age
+                from person p1
+                join person p2 on p1.age = p2.age and p1.id != p2.id;
+            "#,
+            )
+            .unwrap();
     }
 }
