@@ -7,7 +7,7 @@ use crate::{
 use super::join::JoinInferrer;
 
 impl Simulator {
-    pub(crate) fn delete(&self, delete: Delete) -> Result<(), Error> {
+    pub(crate) fn delete(&self, delete: Delete) -> Result<ResolvedQuery, Error> {
         // TODO: Support multi table deletes (for MySQL)
         let mut contexts = vec![];
         let mut resolved = ResolvedQuery::default();
@@ -72,7 +72,7 @@ impl Simulator {
             }
         }
 
-        Ok(())
+        Ok(resolved)
     }
 }
 
@@ -85,8 +85,14 @@ mod tests {
         let mut sim = Simulator::new(GenericDialect {});
         sim.execute("create table person (id int primary key, name text)")
             .unwrap();
-        sim.execute("delete from person where id = ?").unwrap();
         sim.execute("delete from person where id = 5").unwrap();
+
+        let resolve = sim.execute("delete from person where id = ?").unwrap();
+
+        assert_eq!(resolve.inputs.len(), 1);
+        assert_eq!(resolve.get_input(0), Some(&SqlType::Integer));
+
+        assert_eq!(resolve.outputs.len(), 0);
     }
 
     #[test]

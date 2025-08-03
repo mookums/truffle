@@ -115,25 +115,28 @@ impl Simulator {
     }
 
     /// Executes the given SQL in the Simulator and updates the state.
+    /// Returns the resolved query for the last statement ran.
     pub fn execute(&mut self, sql: impl AsRef<str>) -> Result<ResolvedQuery, Error> {
         let parser = Parser::new(&**self.dialect);
         let statements = parser.try_with_sql(sql.as_ref())?.parse_statements()?;
 
+        let mut resolved = ResolvedQuery::default();
+
         for statement in statements {
-            match statement {
+            resolved = match statement {
                 Statement::CreateTable(create_table) => self.create_table(create_table)?,
                 // TODO: Support Alter Table
-                Statement::Query(query) => return self.query(query),
-                Statement::Insert(insert) => return self.insert(insert),
+                Statement::Query(query) => self.query(query)?,
+                Statement::Insert(insert) => self.insert(insert)?,
                 Statement::Delete(delete) => self.delete(delete)?,
                 Statement::Drop {
                     object_type, names, ..
                 } => self.drop(&object_type, names)?,
                 _ => return Err(Error::Unsupported(statement.to_string())),
-            }
+            };
         }
 
-        Ok(ResolvedQuery::default())
+        Ok(resolved)
     }
 }
 
