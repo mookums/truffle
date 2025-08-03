@@ -1,4 +1,7 @@
-use std::collections::HashMap;
+use std::{
+    collections::{HashMap, hash_map},
+    rc::Rc,
+};
 
 use itertools::Itertools;
 use sqlparser::ast::{Join, JoinConstraint, JoinOperator, TableFactor};
@@ -116,7 +119,11 @@ impl Simulator {
             JoinConstraint::On(expr) => {
                 let inferrer = JoinContextInferrer {
                     join_ctx,
-                    right_table: (right_table_name, right_table),
+                    right_table: (
+                        right_table_name,
+                        right_table_alias.map(|x| x.as_str()),
+                        right_table,
+                    ),
                 };
 
                 let ty = self.infer_expr_type(
@@ -195,15 +202,10 @@ impl Simulator {
                 let mut found_common_column = false;
 
                 // Check all columns from left tables against right table
-                for (col_ref, _) in join_ctx.refs.iter().unique_by(|r| *r.1) {
-                    let table_name = &col_ref.qualifier;
+                for (col_ref, column) in join_ctx.refs.iter().unique_by(|r| Rc::as_ptr(r.1)) {
                     let column_name = &col_ref.name;
 
                     if let Some(right_column) = right_table.get_column(column_name) {
-                        let column = join_ctx
-                            .get_qualified_column(table_name, column_name)?
-                            .unwrap();
-
                         // Check if types match
                         if column.ty == right_column.ty {
                             found_common_column = true;
@@ -258,10 +260,7 @@ impl ColumnRef {
 
 #[derive(Debug)]
 pub struct JoinContext {
-    // Maps the alias to the table name
-    pub aliases: HashMap<String, String>,
-    pub refs: HashMap<ColumnRef, usize>,
-    pub columns: Vec<Column>,
+    pub refs: HashMap<ColumnRef, Rc<Column>>,
 }
 
 enum JoinKind {
@@ -276,56 +275,75 @@ impl JoinContext {
         name: impl ToString,
         alias: Option<impl ToString>,
     ) -> Result<JoinContext, Error> {
-        let mut aliases = HashMap::new();
-
         let table_columns = table.columns.clone();
         let mut refs = HashMap::new();
-        let mut columns = Vec::new();
 
         let table_name = name.to_string();
 
-        for (i, (column_name, column)) in table_columns.iter().enumerate() {
+        for (column_name, column) in table_columns.iter() {
+            let col_rc = Rc::new(column.clone());
             assert!(
-                refs.insert(ColumnRef::new(&table_name, column_name), i)
+                refs.insert(ColumnRef::new(&table_name, column_name), col_rc.clone())
                     .is_none()
             );
 
-            columns.push(column.clone());
+            if let Some(alias) = &alias {
+                assert!(
+                    refs.insert(ColumnRef::new(alias.to_string(), column_name), col_rc)
+                        .is_none()
+                )
+            }
         }
 
-        if let Some(alias) = alias {
-            aliases.insert(alias.to_string(), name.to_string());
-        }
-
-        Ok(JoinContext {
-            refs,
-            aliases,
-            columns,
-        })
+        Ok(JoinContext { refs })
     }
 
     fn join_table(
         &mut self,
         table: &Table,
-        name: impl ToString,
+        table_name: impl ToString,
         alias: Option<impl ToString>,
         kind: JoinKind,
     ) -> Result<(), Error> {
         let columns = table.columns.clone();
-        let table_name = name.to_string();
+        let table_name = table_name.to_string();
 
         match kind {
             JoinKind::Cross => {
+                eprintln!("JOIN table columns: {columns:?}");
                 // add all columns from the right to the left
                 for (column_name, column) in columns.iter() {
-                    let index = self.columns.len();
-                    self.columns.push(column.clone());
+                    let existing_column_rc = self
+                        .refs
+                        .iter()
+                        .filter(|r| r.0.qualifier == table_name)
+                        .find_map(|(col_ref, col_rc)| {
+                            if col_ref.name == *column_name {
+                                Some(col_rc.clone())
+                            } else {
+                                None
+                            }
+                        });
 
-                    assert!(
+                    let col_rc = existing_column_rc.unwrap_or_else(|| Rc::new(column.clone()));
+
+                    match self.refs.entry(ColumnRef::new(&table_name, column_name)) {
+                        hash_map::Entry::Occupied(occupied_entry) => {
+                            assert!(
+                                Rc::ptr_eq(occupied_entry.get(), &col_rc),
+                                "Table name collision with different logical columns"
+                            )
+                        }
+                        hash_map::Entry::Vacant(vacant_entry) => {
+                            vacant_entry.insert(col_rc.clone());
+                        }
+                    }
+
+                    if let Some(alias) = &alias {
                         self.refs
-                            .insert(ColumnRef::new(&table_name, column_name), index)
-                            .is_none()
-                    );
+                            .insert(ColumnRef::new(alias.to_string(), column_name), col_rc)
+                            .map_or(Ok(()), |_| Err(Error::AmbiguousAlias(alias.to_string())))?;
+                    }
                 }
             }
             JoinKind::Natural => {
@@ -334,97 +352,157 @@ impl JoinContext {
 
                 for (column_name, column) in columns.iter() {
                     if all_existing_columns.contains(column_name) {
-                        let existing_index = self
+                        let existing_col_rc = self
                             .refs
                             .iter()
-                            .find_map(|(r, idx)| {
-                                if r.name == *column_name {
-                                    Some(*idx)
+                            .find_map(|(col_ref, col_rc)| {
+                                if col_ref.name == *column_name {
+                                    Some(col_rc.clone())
                                 } else {
                                     None
                                 }
                             })
                             .unwrap();
 
-                        assert!(
-                            self.refs
-                                .insert(ColumnRef::new(&table_name, column_name), existing_index)
-                                .is_none()
-                        );
-                    } else {
-                        let index = self.columns.len();
-                        self.columns.push(column.clone());
+                        match self.refs.entry(ColumnRef::new(&table_name, column_name)) {
+                            hash_map::Entry::Occupied(occupied_entry) => {
+                                assert!(
+                                    Rc::ptr_eq(occupied_entry.get(), &existing_col_rc),
+                                    "Table name collision with different logical columns"
+                                )
+                            }
+                            hash_map::Entry::Vacant(vacant_entry) => {
+                                vacant_entry.insert(existing_col_rc.clone());
+                            }
+                        }
 
-                        assert!(
+                        if let Some(alias) = &alias {
                             self.refs
-                                .insert(ColumnRef::new(&table_name, column_name), index)
-                                .is_none()
-                        );
+                                .insert(
+                                    ColumnRef::new(alias.to_string(), column_name),
+                                    existing_col_rc,
+                                )
+                                .map_or(Ok(()), |_| {
+                                    Err(Error::AmbiguousAlias(alias.to_string()))
+                                })?;
+                        }
+                    } else {
+                        let col_rc = Rc::new(column.clone());
+
+                        match self.refs.entry(ColumnRef::new(&table_name, column_name)) {
+                            hash_map::Entry::Occupied(occupied_entry) => {
+                                assert!(
+                                    Rc::ptr_eq(occupied_entry.get(), &col_rc),
+                                    "Table name collision with different logical columns"
+                                )
+                            }
+                            hash_map::Entry::Vacant(vacant_entry) => {
+                                vacant_entry.insert(col_rc.clone());
+                            }
+                        }
+
+                        if let Some(alias) = &alias {
+                            self.refs
+                                .insert(ColumnRef::new(alias.to_string(), column_name), col_rc)
+                                .map_or(Ok(()), |_| {
+                                    Err(Error::AmbiguousAlias(alias.to_string()))
+                                })?;
+                        }
                     }
                 }
             }
             JoinKind::Using(commons) => {
                 for (column_name, column) in columns.iter() {
                     if commons.contains(column_name) {
-                        let existing_index = self
+                        let existing_col_rc = self
                             .refs
                             .iter()
-                            .find_map(|(r, idx)| {
-                                if r.name == *column_name {
-                                    Some(*idx)
+                            .filter_map(|(col_ref, col_rc)| {
+                                if col_ref.name == *column_name {
+                                    Some(col_rc.clone())
                                 } else {
                                     None
                                 }
                             })
+                            .exactly_one()
                             .unwrap();
 
-                        assert!(
-                            self.refs
-                                .insert(ColumnRef::new(&table_name, column_name), existing_index)
-                                .is_none()
-                        );
-                    } else {
-                        let index = self.columns.len();
-                        self.columns.push(column.clone());
+                        match self.refs.entry(ColumnRef::new(&table_name, column_name)) {
+                            hash_map::Entry::Occupied(occupied_entry) => {
+                                assert!(
+                                    Rc::ptr_eq(occupied_entry.get(), &existing_col_rc),
+                                    "Table name collision with different logical columns"
+                                )
+                            }
+                            hash_map::Entry::Vacant(vacant_entry) => {
+                                vacant_entry.insert(existing_col_rc.clone());
+                            }
+                        }
 
-                        assert!(
+                        if let Some(alias) = &alias {
                             self.refs
-                                .insert(ColumnRef::new(&table_name, column_name), index)
-                                .is_none()
-                        );
+                                .insert(
+                                    ColumnRef::new(alias.to_string(), column_name),
+                                    existing_col_rc,
+                                )
+                                .map_or(Ok(()), |_| {
+                                    Err(Error::AmbiguousAlias(alias.to_string()))
+                                })?;
+                        }
+                    } else {
+                        let col_rc = Rc::new(column.clone());
+
+                        match self.refs.entry(ColumnRef::new(&table_name, column_name)) {
+                            hash_map::Entry::Occupied(occupied_entry) => {
+                                assert!(
+                                    Rc::ptr_eq(occupied_entry.get(), &col_rc),
+                                    "Table name collision with different logical columns"
+                                )
+                            }
+                            hash_map::Entry::Vacant(vacant_entry) => {
+                                vacant_entry.insert(col_rc.clone());
+                            }
+                        }
+
+                        if let Some(alias) = &alias {
+                            self.refs
+                                .insert(ColumnRef::new(alias.to_string(), column_name), col_rc)
+                                .map_or(Ok(()), |_| {
+                                    Err(Error::AmbiguousAlias(alias.to_string()))
+                                })?;
+                        }
                     }
                 }
-            }
-        }
-
-        if let Some(alias) = alias {
-            // Ensure we don't have duplicate aliases.
-            if self
-                .aliases
-                .insert(alias.to_string(), name.to_string())
-                .is_some()
-            {
-                return Err(Error::AmbiguousAlias(alias.to_string()));
             }
         }
 
         Ok(())
     }
 
-    pub fn has_table(&self, table: &str) -> bool {
+    pub fn has_qualifier(&self, table: &str) -> bool {
         self.refs.keys().any(|k| k.qualifier == table)
     }
 
-    pub fn get_column(&self, column: &str) -> Result<Option<&Column>, Error> {
-        fn match_into_ty<'a>(
-            join_ctx: &'a JoinContext,
-            matches: &[(ColumnRef, usize)],
-        ) -> Result<Option<&'a Column>, Error> {
-            let m = matches.first().unwrap();
-            Ok(join_ctx.columns.get(m.1))
+    pub fn get_column(&self, column: &str) -> Result<Option<Column>, Error> {
+        fn match_into_column(
+            join_ctx: &JoinContext,
+            matches: &[(ColumnRef, Rc<Column>)],
+        ) -> Column {
+            matches
+                .first()
+                .as_ref()
+                .and_then(|m| {
+                    join_ctx.refs.iter().find_map(
+                        |(col_ref, col_rc)| {
+                            if col_ref == &m.0 { Some(col_rc) } else { None }
+                        },
+                    )
+                })
+                .map(|c| Column::clone(c))
+                .unwrap()
         }
 
-        let matches: Vec<(ColumnRef, usize)> = self
+        let matches: Vec<(ColumnRef, Rc<Column>)> = self
             .refs
             .clone()
             .into_iter()
@@ -433,11 +511,12 @@ impl JoinContext {
 
         match matches.len() {
             0 => Ok(None),
-            1 => match_into_ty(self, &matches),
+            1 => Ok(Some(match_into_column(self, &matches))),
             _ => {
-                let same_logical = matches.iter().map(|m| m.1).all_equal();
+                // We care if the Rcs are the same, not the underlying value.
+                let same_logical = matches.iter().map(|m| Rc::as_ptr(&m.1)).all_equal();
                 if same_logical {
-                    match_into_ty(self, &matches)
+                    Ok(Some(match_into_column(self, &matches)))
                 } else {
                     // It is only ambiguous if they map to different logical columns.
                     Err(Error::AmbiguousColumn(column.to_string()))
@@ -450,27 +529,23 @@ impl JoinContext {
         &self,
         qualifier: &str,
         column: &str,
-    ) -> Result<Option<&Column>, Error> {
-        // Attempt to dereference the alias first.
-        let true_qualifier = self
-            .aliases
-            .get(qualifier)
-            .map(|q| q.as_ref())
-            .unwrap_or(qualifier);
-
+    ) -> Result<Option<Column>, Error> {
         let matches: Vec<_> = self
             .refs
             .iter()
-            .filter(|(k, _)| k.name == column && k.qualifier == true_qualifier)
+            .filter(|(col_ref, _)| col_ref.qualifier == qualifier && col_ref.name == column)
             .collect();
 
         match matches.len() {
             0 => Ok(None),
-            1 => Ok(self.columns.get(*matches[0].1)),
+            1 => Ok(matches.first().map(|m| Column::clone(m.1))),
             _ => {
                 // Should be impossible for us to have multiple logical columns for a qualified match.
-                assert!(matches.iter().map(|(_, idx)| idx).all_equal());
-                Ok(self.columns.get(*matches[0].1))
+                if matches.iter().map(|(_, idx)| idx).all_equal() {
+                    Ok(matches.first().map(|m| Column::clone(m.1)))
+                } else {
+                    unreachable!()
+                }
             }
         }
     }
@@ -499,8 +574,7 @@ impl<'a> ColumnInferrer for JoinInferrer<'a> {
         let mut found_ty: Option<SqlType> = None;
 
         for join_ctx in self.join_contexts {
-            let new_found_ty = join_ctx.infer_unqualified_type(column)?;
-            if let Some(ty) = new_found_ty {
+            if let Some(ty) = join_ctx.infer_unqualified_type(column)? {
                 match found_ty {
                     Some(_) => return Err(Error::AmbiguousColumn(column.to_string())),
                     None => found_ty = Some(ty),
@@ -532,7 +606,7 @@ impl<'a> ColumnInferrer for JoinInferrer<'a> {
 
 struct JoinContextInferrer<'a> {
     join_ctx: &'a JoinContext,
-    right_table: (&'a str, &'a Table),
+    right_table: (&'a str, Option<&'a str>, &'a Table),
 }
 
 impl<'a> ColumnInferrer for JoinContextInferrer<'a> {
@@ -545,7 +619,7 @@ impl<'a> ColumnInferrer for JoinContextInferrer<'a> {
         let mut found_ty = self.join_ctx.infer_unqualified_type(column)?;
 
         // Search Right Table.
-        if let Some(col) = self.right_table.1.get_column(column) {
+        if let Some(col) = self.right_table.2.get_column(column) {
             match found_ty {
                 // Ensure that the unqualified column is unique.
                 Some(_) => return Err(Error::AmbiguousColumn(column.to_string())),
@@ -565,9 +639,14 @@ impl<'a> ColumnInferrer for JoinContextInferrer<'a> {
         if let Ok(ty) = self.join_ctx.infer_qualified_type(qualifier, column) {
             Ok(ty)
         } else {
-            // Otherwise, try to find it in the right table...
-            if self.right_table.0 == qualifier {
-                if let Some(col) = self.right_table.1.get_column(column) {
+            if let Some(right_alias) = self.right_table.1
+                && qualifier == right_alias
+            {
+                if let Some(col) = self.right_table.2.get_column(column) {
+                    return Ok(col.ty.clone());
+                }
+            } else if qualifier == self.right_table.0 {
+                if let Some(col) = self.right_table.2.get_column(column) {
                     return Ok(col.ty.clone());
                 }
             }

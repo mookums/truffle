@@ -2,7 +2,7 @@ mod action;
 mod column;
 mod expr;
 mod misc;
-mod resolve;
+pub mod resolve;
 mod table;
 mod ty;
 
@@ -41,8 +41,8 @@ pub enum Error {
     AmbiguousAlias(String),
     #[error("Alias '{0}' doesn't exist")]
     AliasDoesntExist(String),
-    #[error("Table or Alias '{0}' doesn't exist")]
-    TableOrAliasDoesntExist(String),
+    #[error("Qualifier '{0}' doesn't exist")]
+    QualifierDoesntExist(String),
     #[error("Qualified Column '{qualifier}.{column}' doesn't exist")]
     QualifiedColumnDoesntExist { qualifier: String, column: String },
     #[error("Alias '{0}' is the name of an existing Table")]

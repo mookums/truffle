@@ -3,7 +3,7 @@ use std::{fs::read_to_string, path::Path};
 use clap::Parser;
 use rustyline::{DefaultEditor, error::ReadlineError};
 use tracing::{error, info};
-use truffle::{GenericDialect, Simulator};
+use truffle::{GenericDialect, Simulator, resolve::ResolvedQuery};
 
 #[derive(clap::Parser)]
 #[command(version)]
@@ -37,15 +37,17 @@ fn main() {
             }
         }
         Commands::Repl => {
-            fn execute_sql(sim: &mut Simulator, sql: &str) {
+            fn execute_sql(sim: &mut Simulator, sql: &str) -> Option<ResolvedQuery> {
                 match sim.execute(sql) {
-                    Ok(_) => {
+                    Ok(resolved) => {
                         println!("✅ ok");
+                        Some(resolved)
                     }
                     Err(e) => {
                         println!("❌ {e}");
+                        None
                     }
-                };
+                }
             }
 
             let mut sim = Simulator::new(GenericDialect {});
@@ -136,7 +138,9 @@ fn main() {
                             continue;
                         }
 
-                        execute_sql(&mut sim, &line);
+                        if let Some(resolve) = execute_sql(&mut sim, &line) {
+                            println!("{resolve}")
+                        }
                     }
                     Err(ReadlineError::Interrupted) => {
                         println!("CTRL-C");
