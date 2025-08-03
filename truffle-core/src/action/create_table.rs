@@ -12,7 +12,10 @@ use crate::{
 };
 
 impl Simulator {
-    pub(crate) fn create_table(&mut self, create_table: CreateTable) -> Result<(), Error> {
+    pub(crate) fn create_table(
+        &mut self,
+        create_table: CreateTable,
+    ) -> Result<ResolvedQuery, Error> {
         let name = object_name_to_strings(&create_table.name).pop().unwrap();
 
         // Ensure that this table doesn't already exist.
@@ -276,7 +279,7 @@ impl Simulator {
         debug!(name = %name, "Creating Table");
         self.tables.insert(name, table);
 
-        Ok(())
+        Ok(ResolvedQuery::default())
     }
 }
 

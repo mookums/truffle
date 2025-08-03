@@ -1,14 +1,14 @@
 use sqlparser::ast::{ObjectName, ObjectType};
 use tracing::{debug, warn};
 
-use crate::{Error, Simulator, object_name_to_strings, table::Constraint};
+use crate::{Error, Simulator, object_name_to_strings, resolve::ResolvedQuery, table::Constraint};
 
 impl Simulator {
     pub(crate) fn drop(
         &mut self,
         object_type: &ObjectType,
         names: Vec<ObjectName>,
-    ) -> Result<(), Error> {
+    ) -> Result<ResolvedQuery, Error> {
         if matches!(object_type, ObjectType::Table) {
             for name in names.iter().flat_map(object_name_to_strings) {
                 // Ensure that the table being dropped exists.
@@ -34,7 +34,7 @@ impl Simulator {
             warn!(object = %object_type, "Unsupported Drop");
         }
 
-        Ok(())
+        Ok(ResolvedQuery::default())
     }
 }
 
