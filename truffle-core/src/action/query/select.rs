@@ -170,11 +170,12 @@ impl Simulator {
                             let mut found = false;
 
                             for context in contexts.iter().filter(|c| c.has_qualifier(&qualifier)) {
+                                // We are about if the Rcs are the same, not the underlying value.
                                 for (col_ref, _) in context
                                     .refs
                                     .iter()
                                     .filter(|r| r.0.qualifier == qualifier)
-                                    .unique_by(|r| r.1)
+                                    .unique_by(|r| Rc::as_ptr(r.1))
                                 {
                                     let true_column = context
                                         .get_qualified_column(&col_ref.qualifier, &col_ref.name)?
@@ -1689,6 +1690,57 @@ mod tests {
         );
         assert_eq!(
             resolve.get_output("p1", "age").map(|r| &r.ty),
+            Some(&SqlType::Integer)
+        );
+    }
+
+    #[test]
+    fn select_with_aliased_wildcard_outputs() {
+        let mut sim = Simulator::new(GenericDialect {});
+        sim.execute(
+            "create table person (id int primary key, name text not null, age int default 20, created_at int not null)",
+        )
+        .unwrap();
+        sim.execute("create table item (id int primary key, person_id int references person(id), created_at int not null)").unwrap();
+
+        let resolve = sim
+            .execute(
+                r#"
+                select person.*, item.*
+                from person join item on person.id == item.person_id;
+            "#,
+            )
+            .unwrap();
+
+        assert_eq!(resolve.inputs.len(), 0);
+
+        assert_eq!(resolve.outputs.len(), 7);
+        assert_eq!(
+            resolve.get_output("person", "id").map(|r| &r.ty),
+            Some(&SqlType::Integer)
+        );
+        assert_eq!(
+            resolve.get_output("person", "name").map(|r| &r.ty),
+            Some(&SqlType::Text)
+        );
+        assert_eq!(
+            resolve.get_output("person", "age").map(|r| &r.ty),
+            Some(&SqlType::Integer)
+        );
+        assert_eq!(
+            resolve.get_output("person", "created_at").map(|r| &r.ty),
+            Some(&SqlType::Integer)
+        );
+        assert_eq!(
+            resolve.get_output("item", "id").map(|r| &r.ty),
+            Some(&SqlType::Integer)
+        );
+        assert_eq!(
+            resolve.get_output("item", "person_id").map(|r| &r.ty),
+            Some(&SqlType::Integer)
+        );
+        assert_eq!(
+            resolve.get_output("item", "created_at").map(|r| &r.ty),
             Some(&SqlType::Integer)
         );
     }
