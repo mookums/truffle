@@ -75,10 +75,10 @@ impl Simulator {
             }
             Expr::CompoundIdentifier(idents) => {
                 // validate that identifier is a column.
-                let table_or_alias = &idents.first().unwrap().value;
+                let qualifier = &idents.first().unwrap().value;
                 let column_name = &idents.get(1).unwrap().value;
 
-                inferrer.infer_qualified_type(self, table_or_alias, column_name)?
+                inferrer.infer_qualified_type(self, qualifier, column_name)?
             }
             Expr::BinaryOp { left, right, op } => {
                 self.infer_binary_op_type([left, right], op, expected, inferrer, resolved)?

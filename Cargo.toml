@@ -4,7 +4,7 @@ members = [
     "truffle-cli",
     "truffle-core",
     "truffle-loader",
-    "truffle-sqlx",
+    "truffle-sqlx", "truffle-sqlx-demo",
 ]
 
 [workspace.package]

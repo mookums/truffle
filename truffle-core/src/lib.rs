@@ -4,7 +4,7 @@ mod expr;
 mod misc;
 pub mod resolve;
 mod table;
-mod ty;
+pub mod ty;
 
 pub use misc::config::Config;
 use misc::config::DialectKind;
