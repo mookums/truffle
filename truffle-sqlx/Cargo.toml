@@ -6,6 +6,24 @@ edition = "2024"
 [lib]
 proc-macro = true
 
+[features]
+default = []
+
+# Enable all features
+all = ["time", "json", "uuid", "serde"]
+
+# Enable Time
+time = ["truffle/time"]
+
+# Enable JSON
+json = ["truffle/json"]
+
+# Enable UUID
+uuid = ["truffle/uuid"]
+
+# Enable Serde
+serde = ["truffle/serde"]
+
 [dependencies]
 truffle = { path = "../truffle-core" }
 truffle-loader = { path = "../truffle-loader" }
