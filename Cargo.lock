@@ -2222,9 +2222,12 @@ name = "truffle-sqlx"
 version = "0.1.0"
 dependencies = [
  "quote",
+ "serde_json",
  "syn",
+ "time",
  "truffle",
  "truffle-loader",
+ "uuid",
 ]
 
 [[package]]

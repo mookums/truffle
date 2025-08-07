@@ -33,6 +33,7 @@
           packages = with pkgs; [
             rustToolchain
             cargo-hakari
+            cargo-expand
           ];
         };
       }

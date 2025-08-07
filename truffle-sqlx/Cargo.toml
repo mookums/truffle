@@ -13,18 +13,22 @@ default = []
 all = ["time", "json", "uuid", "serde"]
 
 # Enable Time
-time = ["truffle/time"]
+time = ["dep:time", "truffle/time"]
 
 # Enable JSON
-json = ["truffle/json"]
+json = ["dep:serde_json", "truffle/json"]
 
 # Enable UUID
-uuid = ["truffle/uuid"]
+uuid = ["dep:uuid", "truffle/uuid"]
 
 # Enable Serde
 serde = ["truffle/serde"]
 
 [dependencies]
+uuid = { workspace = true, optional = true }
+serde_json = { workspace = true, optional = true }
+time = { workspace = true, optional = true }
+
 truffle = { path = "../truffle-core" }
 truffle-loader = { path = "../truffle-loader" }
 quote = "1.0.40"

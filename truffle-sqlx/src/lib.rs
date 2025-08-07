@@ -4,7 +4,7 @@ use std::{
     hash::{DefaultHasher, Hash, Hasher},
     sync::LazyLock,
 };
-use syn::{Error, Token, parse::Parse};
+use syn::{Error, Token, parse::Parse, parse_quote};
 use truffle::{Simulator, ty::SqlType};
 use truffle_loader::{
     config::load_config,
@@ -53,6 +53,31 @@ impl Parse for QueryInput {
     }
 }
 
+fn sql_type_to_rust_type(sql_type: &SqlType) -> syn::Type {
+    match sql_type {
+        SqlType::SmallInt => parse_quote!(i16),
+        SqlType::Integer => parse_quote!(i32),
+        SqlType::BigInt => parse_quote!(i64),
+        SqlType::Float => parse_quote!(f32),
+        SqlType::Double => parse_quote!(f64),
+        SqlType::Text => parse_quote!(String),
+        SqlType::Boolean => parse_quote!(bool),
+        #[cfg(feature = "time")]
+        SqlType::Date => parse_quote!(time::Date),
+        #[cfg(feature = "time")]
+        SqlType::Time => parse_quote!(time::Time),
+        #[cfg(feature = "time")]
+        SqlType::Timestamp => parse_quote!(time::PrimitiveDateTime),
+        #[cfg(feature = "time")]
+        SqlType::TimestampTz => parse_quote!(time::OffsetDateTime),
+        #[cfg(feature = "uuid")]
+        SqlType::Uuid => parse_quote!(uuid::Uuid),
+        #[cfg(feature = "json")]
+        SqlType::Json => parse_quote!(serde_json::Value),
+        _ => panic!("Unsupported Type: {sql_type:?}"),
+    }
+}
+
 /// Validates the syntax and semantics of your SQL at compile time.
 #[proc_macro]
 pub fn query(input: TokenStream) -> TokenStream {
@@ -86,16 +111,12 @@ pub fn query(input: TokenStream) -> TokenStream {
         .enumerate()
         .map(|(i, (sql_type, rust_expr))| {
             let binding = syn::Ident::new(&format!("_arg_{i}"), Span::call_site().into());
+            let rust_type = sql_type_to_rust_type(sql_type);
 
-            let conversion = match sql_type {
-                SqlType::SmallInt => quote! { let #binding: i16 = (#rust_expr).into(); },
-                SqlType::Integer => quote! { let #binding: i32 = (#rust_expr).into(); },
-                SqlType::BigInt => quote! { let #binding: i64 = (#rust_expr).into(); },
-                SqlType::Float => quote! { let #binding: f32 = (#rust_expr).into(); },
-                SqlType::Double => quote! { let #binding: f64 = (#rust_expr).into(); },
-                SqlType::Text => quote! { let #binding: String = (#rust_expr).to_string(); },
-                SqlType::Boolean => quote! { let #binding: bool = (#rust_expr).into(); },
-                _ => quote! { let #binding = #rust_expr; },
+            let conversion = if sql_type == &SqlType::Text {
+                quote! { let #binding: String = (#rust_expr).to_string(); }
+            } else {
+                quote! { let #binding: #rust_type = (#rust_expr).into(); }
             };
 
             (conversion, binding)
@@ -145,16 +166,12 @@ pub fn query_as(input: TokenStream) -> TokenStream {
         .enumerate()
         .map(|(i, (sql_type, rust_expr))| {
             let binding = syn::Ident::new(&format!("_arg_{i}"), Span::call_site().into());
+            let rust_type = sql_type_to_rust_type(sql_type);
 
-            let conversion = match sql_type {
-                SqlType::SmallInt => quote! { let #binding: i16 = (#rust_expr).into(); },
-                SqlType::Integer => quote! { let #binding: i32 = (#rust_expr).into(); },
-                SqlType::BigInt => quote! { let #binding: i64 = (#rust_expr).into(); },
-                SqlType::Float => quote! { let #binding: f32 = (#rust_expr).into(); },
-                SqlType::Double => quote! { let #binding: f64 = (#rust_expr).into(); },
-                SqlType::Text => quote! { let #binding: String = (#rust_expr).to_string(); },
-                SqlType::Boolean => quote! { let #binding: bool = (#rust_expr).into(); },
-                _ => quote! { let #binding = #rust_expr; },
+            let conversion = if sql_type == &SqlType::Text {
+                quote! { let #binding: String = (#rust_expr).to_string(); }
+            } else {
+                quote! { let #binding: #rust_type = (#rust_expr).into(); }
             };
 
             (conversion, binding)
@@ -166,21 +183,12 @@ pub fn query_as(input: TokenStream) -> TokenStream {
     let result_fields: Vec<_> = resolve
         .output_iter()
         .map(|(name, col)| {
-            let base_type = match col.ty {
-                SqlType::SmallInt => quote!(i16),
-                SqlType::Integer => quote!(i32),
-                SqlType::BigInt => quote!(i64),
-                SqlType::Float => quote!(f32),
-                SqlType::Double => quote!(f64),
-                SqlType::Text => quote!(String),
-                SqlType::Boolean => quote!(bool),
-                _ => panic!("Unsupported Type"),
-            };
+            let base_type = sql_type_to_rust_type(&col.ty);
 
             let true_type = if col.nullable {
                 quote! { Option<#base_type> }
             } else {
-                base_type
+                quote! { #base_type }
             };
 
             let field_name = syn::Ident::new(&name.name, Span::call_site().into());

@@ -31,6 +31,6 @@ sqlparser = "0.57.0"
 indexmap = "2.10.0"
 itertools = "0.14.0"
 
-uuid = {  version = "1.17.0", optional = true }
-serde_json = { version = "1.0.140", optional = true }
-time = { version = "0.3.41", features = ["parsing"], optional = true }
+uuid = { workspace = true, optional = true }
+serde_json = { workspace = true, optional = true }
+time = { workspace = true, features = ["parsing"], optional = true }
