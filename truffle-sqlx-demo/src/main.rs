@@ -1,6 +1,3 @@
-use std::str::FromStr;
-
-use sqlx::sqlite::SqliteConnectOptions;
 use sqlx::sqlite::SqlitePool;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -22,11 +19,7 @@ impl From<AccountStatus> for i32 {
 
 #[tokio::main]
 async fn main() {
-    let opts = SqliteConnectOptions::from_str("./test.db")
-        .unwrap()
-        .create_if_missing(true);
-    let db = SqlitePool::connect_with(opts).await.unwrap();
-
+    let db = SqlitePool::connect(":memory:").await.unwrap();
     sqlx::migrate!().run(&db).await.unwrap();
 
     truffle_sqlx::query!(
