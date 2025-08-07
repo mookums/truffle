@@ -1,6 +1,7 @@
 use serde::Deserialize;
 
 #[derive(Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum DialectKind {
     Generic,
     Ansi,
@@ -9,6 +10,7 @@ pub enum DialectKind {
 }
 
 #[derive(Deserialize)]
+#[serde(default)]
 pub struct Config {
     pub dialect: DialectKind,
     pub migrations: String,
