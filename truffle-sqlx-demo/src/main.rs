@@ -30,7 +30,6 @@ async fn main() {
     sqlx::migrate!().run(&db).await.unwrap();
 
     truffle_sqlx::query!(
-        (),
         r#"
         insert into account
         values (?, ?, ?, ?, ?);
@@ -44,4 +43,17 @@ async fn main() {
     .execute(&db)
     .await
     .unwrap();
+
+    let item = truffle_sqlx::query_as!(
+        r#"
+        select * from account
+        where id = ?
+        "#,
+        0
+    )
+    .fetch_one(&db)
+    .await
+    .unwrap();
+
+    println!("Fetched Item: {item:?}");
 }
