@@ -4,7 +4,11 @@ use std::{
     hash::{DefaultHasher, Hash, Hasher},
     sync::LazyLock,
 };
-use syn::{Error, Token, parse::Parse, parse_quote};
+use syn::{
+    Error, Token,
+    parse::{Parse, discouraged::Speculative},
+    parse_quote,
+};
 use truffle::{Simulator, ty::SqlType};
 use truffle_loader::{
     config::load_config,
@@ -47,6 +51,51 @@ impl Parse for QueryInput {
         };
 
         Ok(QueryInput {
+            sql_lit,
+            placeholders,
+        })
+    }
+}
+
+struct QueryAsInput {
+    ty: Option<syn::Type>,
+    sql_lit: syn::LitStr,
+    placeholders: Vec<syn::Expr>,
+}
+
+impl Parse for QueryAsInput {
+    fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
+        let fork = input.fork();
+
+        let (ty, sql_lit) = fork
+            .parse::<syn::Type>()
+            .ok()
+            .and_then(|ty| {
+                fork.parse::<Token![,]>().ok().and_then(|_| {
+                    fork.parse::<syn::LitStr>().ok().map(|sql_lit| {
+                        input.advance_to(&fork);
+
+                        (Some(ty), sql_lit)
+                    })
+                })
+            })
+            .unwrap_or_else(|| (None, input.parse().unwrap()));
+
+        let placeholders: Vec<_> = if input.is_empty() {
+            Vec::new()
+        } else {
+            // Take the comma after SQL.
+
+            input.parse::<Token![,]>()?;
+
+            input
+                .parse_terminated(syn::Expr::parse, Token![,])?
+                .into_iter()
+                .collect()
+        };
+
+        Ok(QueryAsInput {
+            ty,
             sql_lit,
             placeholders,
         })
@@ -137,7 +186,7 @@ pub fn query(input: TokenStream) -> TokenStream {
 /// Validates the syntax and semantics of your SQL at compile time.
 #[proc_macro]
 pub fn query_as(input: TokenStream) -> TokenStream {
-    let parsed = syn::parse_macro_input!(input as QueryInput);
+    let parsed = syn::parse_macro_input!(input as QueryAsInput);
     let sql = parsed.sql_lit.value();
 
     let mut sim = match SIMULATOR.as_ref() {
@@ -188,57 +237,71 @@ pub fn query_as(input: TokenStream) -> TokenStream {
 
     let (conversions, binding_names): (Vec<_>, Vec<_>) = bindings.into_iter().unzip();
 
-    // try directly casting into the given type.
-    // this would require from/into for each type so we would need a secondary set of type checks.
-    //
-    // but then we should try to do:
-    //
-    // sqlx::query_as::<_, #given_type>(#sql)#(.bind(#binding_names))*
-    //       .try_map(|row| {
-    //           use ::sqlx::Row as _;
-    //           Ok(#given_type {
-    //               #(#field_name: row.try_get(#i)?.into()),*
-    //           })
-    //       })
+    if let Some(ty) = parsed.ty {
+        let fields: Vec<_> = resolve
+            .output_iter()
+            .map(|(name, col)| {
+                let field_name = &name.name;
+                let field_ident = syn::Ident::new(field_name, Span::call_site().into());
+                let rust_type = sql_type_to_rust_type(&col.ty);
 
-    let result_fields: Vec<_> = resolve
-        .output_iter()
-        .map(|(name, col)| {
-            let base_type = sql_type_to_rust_type(&col.ty);
+                quote! {
+                    #field_ident: row.try_get::<'_, #rust_type, _>(#field_name)?.into(),
+                }
+            })
+            .collect();
 
-            let true_type = if col.nullable {
-                quote! { Option<#base_type> }
-            } else {
-                quote! { #base_type }
-            };
-
-            let field_name = syn::Ident::new(&name.name, Span::call_site().into());
-
-            quote! {
-                pub #field_name: #true_type,
+        TokenStream::from(quote! {
+            {
+                #(#conversions)*
+                sqlx::query(#sql)#(.bind(#binding_names))*
+                      // TODO: Support other DBs
+                      .try_map(|row: sqlx::sqlite::SqliteRow| {
+                          use sqlx::Row as _;
+                          Ok(#ty { #(#fields)* })
+                })
             }
         })
-        .collect();
+    } else {
+        let result_fields: Vec<_> = resolve
+            .output_iter()
+            .map(|(name, col)| {
+                let base_type = sql_type_to_rust_type(&col.ty);
 
-    let mut hasher = DefaultHasher::new();
-    sql.hash(&mut hasher);
-    let hashed = hasher.finish();
+                let true_type = if col.nullable {
+                    quote! { Option<#base_type> }
+                } else {
+                    quote! { #base_type }
+                };
 
-    let result_struct_name =
-        syn::Ident::new(&format!("QueryResult_{hashed}"), Span::call_site().into());
+                let field_name = syn::Ident::new(&name.name, Span::call_site().into());
 
-    // Run your SQL.
-    TokenStream::from(quote! {
-        {
-            #[derive(Debug, Clone, sqlx::FromRow)]
-            pub struct #result_struct_name {
-                #(#result_fields)*
+                quote! {
+                    pub #field_name: #true_type,
+                }
+            })
+            .collect();
+
+        let mut hasher = DefaultHasher::new();
+        sql.hash(&mut hasher);
+        let hashed = hasher.finish();
+
+        let result_struct_name =
+            syn::Ident::new(&format!("QueryResult_{hashed}"), Span::call_site().into());
+
+        // Run your SQL.
+        TokenStream::from(quote! {
+            {
+                #[derive(Debug, Clone, sqlx::FromRow)]
+                pub struct #result_struct_name {
+                    #(#result_fields)*
+                }
+
+                #(#conversions)*
+                sqlx::query_as::<_, #result_struct_name>(#sql)#(.bind(#binding_names))*
             }
-
-            #(#conversions)*
-            sqlx::query_as::<_, #result_struct_name>(#sql)#(.bind(#binding_names))*
-        }
-    })
+        })
+    }
 }
 
 // #[proc_macro]

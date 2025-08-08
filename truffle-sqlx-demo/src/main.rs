@@ -1,10 +1,30 @@
 use sqlx::sqlite::SqlitePool;
 
+#[derive(Debug)]
+pub struct Account {
+    pub id: i32,
+    pub name: String,
+    pub email: String,
+    pub password: String,
+    pub status: AccountStatus,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum AccountStatus {
     Active = 1,
     Inactive = 2,
     Deleted = 3,
+}
+
+impl From<i32> for AccountStatus {
+    fn from(value: i32) -> Self {
+        match value {
+            1 => AccountStatus::Active,
+            2 => AccountStatus::Inactive,
+            3 => AccountStatus::Deleted,
+            _ => unreachable!(),
+        }
+    }
 }
 
 impl From<AccountStatus> for i32 {
@@ -37,7 +57,8 @@ async fn main() {
     .await
     .unwrap();
 
-    let item = truffle_sqlx::query_as!(
+    let account = truffle_sqlx::query_as!(
+        Account,
         r#"
         select * from account
         where id = ?
@@ -48,5 +69,13 @@ async fn main() {
     .await
     .unwrap();
 
-    println!("Fetched Item: {item:?}");
+    let id_name: (String, AccountStatus) =
+        truffle_sqlx::query_as!("select name, status from account where id = ?", 0)
+            .fetch_one(&db)
+            .await
+            .map(|p| (p.name, p.status.into()))
+            .unwrap();
+
+    println!("Fetched Item: {account:?}");
+    println!("Item Pair: {id_name:?}");
 }
