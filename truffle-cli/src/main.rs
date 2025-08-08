@@ -3,7 +3,7 @@ use std::{fs::read_to_string, path::Path};
 use clap::Parser;
 use rustyline::{DefaultEditor, error::ReadlineError};
 use tracing::{error, info};
-use truffle::{GenericDialect, Simulator, resolve::ResolvedQuery};
+use truffle::{Simulator, resolve::ResolvedQuery};
 
 #[derive(clap::Parser)]
 #[command(version)]
@@ -27,7 +27,7 @@ fn main() {
     match cli.command {
         Commands::Validate { path } => {
             let sql = read_to_string(path).unwrap();
-            let mut sim = Simulator::new(GenericDialect {});
+            let mut sim = Simulator::default();
             if let Err(err) = sim.execute(&sql) {
                 info!("{sim:#?}");
                 error!("{err}");
@@ -50,7 +50,7 @@ fn main() {
                 }
             }
 
-            let mut sim = Simulator::new(GenericDialect {});
+            let mut sim = Simulator::default();
             let mut rl = DefaultEditor::new().unwrap();
 
             println!("truffle repl!");

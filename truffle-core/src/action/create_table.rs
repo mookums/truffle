@@ -329,7 +329,7 @@ mod tests {
 
     #[test]
     fn create_table() {
-        let mut sim = Simulator::new(GenericDialect {});
+        let mut sim = Simulator::default();
         sim.execute("create table abc (id int);").unwrap();
         assert_eq!(sim.tables.len(), 1);
         assert!(sim.tables.contains_key("abc"));
@@ -337,7 +337,7 @@ mod tests {
 
     #[test]
     fn create_table_duplicate() {
-        let mut sim = Simulator::new(GenericDialect {});
+        let mut sim = Simulator::default();
         sim.execute("create table abc (id int);").unwrap();
         assert_eq!(sim.tables.len(), 1);
         assert!(sim.tables.contains_key("abc"));
@@ -349,7 +349,7 @@ mod tests {
 
     #[test]
     fn create_table_if_not_exists_duplicate() {
-        let mut sim = Simulator::new(GenericDialect {});
+        let mut sim = Simulator::default();
         sim.execute("create table abc (id int);").unwrap();
         assert_eq!(sim.tables.len(), 1);
         assert!(sim.tables.contains_key("abc"));
@@ -361,7 +361,7 @@ mod tests {
     #[test]
     #[cfg(feature = "uuid")]
     fn create_table_columns() {
-        let mut sim = Simulator::new(GenericDialect {});
+        let mut sim = Simulator::default();
         sim.execute("create table person (id uuid, name text, weight real);")
             .unwrap();
         assert_eq!(sim.tables.len(), 1);
@@ -376,7 +376,7 @@ mod tests {
 
     #[test]
     fn create_table_columns_duplicate() {
-        let mut sim = Simulator::new(GenericDialect {});
+        let mut sim = Simulator::default();
         assert_eq!(
             sim.execute("create table person (id uuid, id int);"),
             Err(Error::ColumnAlreadyExists("id".to_string()))
@@ -385,7 +385,7 @@ mod tests {
 
     #[test]
     fn create_table_with_col_foreign_key() {
-        let mut sim = Simulator::new(GenericDialect {});
+        let mut sim = Simulator::default();
         sim.execute("create table person (id uuid primary key, name text unique, phone int);")
             .unwrap();
         sim.execute(
@@ -401,7 +401,7 @@ mod tests {
 
     #[test]
     fn create_table_with_col_foreign_key_table_doesnt_exist() {
-        let mut sim = Simulator::new(GenericDialect {});
+        let mut sim = Simulator::default();
         assert_eq!(
             sim.execute(
                 r#"
@@ -417,7 +417,7 @@ mod tests {
 
     #[test]
     fn create_table_with_col_foreign_key_column_doesnt_exist() {
-        let mut sim = Simulator::new(GenericDialect {});
+        let mut sim = Simulator::default();
         sim.execute("create table person (id uuid primary key, name text unique, phone int);")
             .unwrap();
         assert_eq!(
@@ -447,7 +447,7 @@ mod tests {
     #[test]
     #[cfg(feature = "uuid")]
     fn create_table_with_col_foreign_key_type_mismatch() {
-        let mut sim = Simulator::new(GenericDialect {});
+        let mut sim = Simulator::default();
         sim.execute("create table person (id uuid primary key, name text unique, phone int);")
             .unwrap();
 
@@ -469,7 +469,7 @@ mod tests {
 
     #[test]
     fn create_table_with_table_foreign_key() {
-        let mut sim = Simulator::new(GenericDialect {});
+        let mut sim = Simulator::default();
         sim.execute("create table person (id uuid primary key, name text unique, phone int);")
             .unwrap();
         sim.execute(
@@ -486,7 +486,7 @@ mod tests {
 
     #[test]
     fn create_table_with_table_foreign_key_table_doesnt_exist() {
-        let mut sim = Simulator::new(GenericDialect {});
+        let mut sim = Simulator::default();
         assert_eq!(
             sim.execute(
                 r#"
@@ -503,7 +503,7 @@ mod tests {
 
     #[test]
     fn create_table_with_table_foreign_key_column_doesnt_exist() {
-        let mut sim = Simulator::new(GenericDialect {});
+        let mut sim = Simulator::default();
         sim.execute("create table person (id uuid primary key, name text unique, phone int);")
             .unwrap();
         assert_eq!(
@@ -535,7 +535,7 @@ mod tests {
     #[test]
     #[cfg(feature = "uuid")]
     fn create_table_with_table_foreign_key_type_mismatch() {
-        let mut sim = Simulator::new(GenericDialect {});
+        let mut sim = Simulator::default();
         sim.execute("create table person (id uuid primary key, name text unique, phone int);")
             .unwrap();
 
@@ -558,7 +558,7 @@ mod tests {
 
     #[test]
     fn create_table_foreign_key_on_delete_null_on_not_null() {
-        let mut sim = Simulator::new(GenericDialect {});
+        let mut sim = Simulator::default();
         sim.execute("create table person (id uuid primary key, name text unique, phone int);")
             .unwrap();
 
@@ -578,7 +578,7 @@ mod tests {
 
     #[test]
     fn create_table_foreign_key_on_delete_default_on_not_default() {
-        let mut sim = Simulator::new(GenericDialect {});
+        let mut sim = Simulator::default();
         sim.execute("create table person (id uuid primary key, name text unique, phone int);")
             .unwrap();
 
@@ -598,7 +598,7 @@ mod tests {
 
     #[test]
     fn create_table_col_foreign_key_on_update_null_on_not_null() {
-        let mut sim = Simulator::new(GenericDialect {});
+        let mut sim = Simulator::default();
         sim.execute("create table person (id uuid primary key, name text unique, phone int);")
             .unwrap();
 
@@ -617,7 +617,7 @@ mod tests {
 
     #[test]
     fn create_table_col_foreign_key_on_update_default_on_not_default() {
-        let mut sim = Simulator::new(GenericDialect {});
+        let mut sim = Simulator::default();
         sim.execute("create table person (id uuid primary key, name text unique, phone int);")
             .unwrap();
 
@@ -636,7 +636,7 @@ mod tests {
 
     #[test]
     fn create_table_table_foreign_key_on_update_null_on_not_null() {
-        let mut sim = Simulator::new(GenericDialect {});
+        let mut sim = Simulator::default();
         sim.execute("create table person (id uuid primary key, name text unique, phone int);")
             .unwrap();
 
@@ -656,7 +656,7 @@ mod tests {
 
     #[test]
     fn create_table_table_foreign_key_on_update_default_on_not_default() {
-        let mut sim = Simulator::new(GenericDialect {});
+        let mut sim = Simulator::default();
         sim.execute("create table person (id uuid primary key, name text unique, phone int);")
             .unwrap();
 
@@ -676,7 +676,7 @@ mod tests {
 
     #[test]
     fn create_table_with_primary_key_col() {
-        let mut sim = Simulator::new(GenericDialect {});
+        let mut sim = Simulator::default();
         sim.execute("create table person (id uuid primary key);")
             .unwrap();
 
@@ -685,7 +685,7 @@ mod tests {
 
     #[test]
     fn create_table_with_unique_col() {
-        let mut sim = Simulator::new(GenericDialect {});
+        let mut sim = Simulator::default();
         sim.execute("create table person (id uuid primary key, name text unique);")
             .unwrap();
 
@@ -694,7 +694,7 @@ mod tests {
 
     #[test]
     fn create_table_with_primary_key_on_table() {
-        let mut sim = Simulator::new(GenericDialect {});
+        let mut sim = Simulator::default();
         sim.execute("create table person (id uuid, primary key (id));")
             .unwrap();
 
@@ -703,7 +703,7 @@ mod tests {
 
     #[test]
     fn create_table_with_unique_on_table() {
-        let mut sim = Simulator::new(GenericDialect {});
+        let mut sim = Simulator::default();
         sim.execute("create table person (id uuid primary key, name text, unique(name));")
             .unwrap();
 
@@ -712,7 +712,7 @@ mod tests {
 
     #[test]
     fn create_table_with_default_value_type_mismatch() {
-        let mut sim = Simulator::new(GenericDialect {});
+        let mut sim = Simulator::default();
         assert_eq!(
             sim.execute(
                 "create table person (id uuid primary key, name text default 123, unique(name));",
@@ -726,7 +726,7 @@ mod tests {
 
     #[test]
     fn create_table_with_default_value_column_name() {
-        let mut sim = Simulator::new(GenericDialect {});
+        let mut sim = Simulator::default();
         assert_eq!(
             sim.execute(
                 "create table person (id uuid primary key, name text, nickname text default name, unique(name));",

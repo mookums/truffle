@@ -82,7 +82,7 @@ mod tests {
 
     #[test]
     fn delete_row_by_field() {
-        let mut sim = Simulator::new(GenericDialect {});
+        let mut sim = Simulator::default();
         sim.execute("create table person (id int primary key, name text)")
             .unwrap();
         sim.execute("delete from person where id = 5").unwrap();
@@ -97,7 +97,7 @@ mod tests {
 
     #[test]
     fn delete_row_column_doesnt_exist() {
-        let mut sim = Simulator::new(GenericDialect {});
+        let mut sim = Simulator::default();
         sim.execute("create table person (id int primary key, name text)")
             .unwrap();
 
@@ -109,7 +109,7 @@ mod tests {
 
     #[test]
     fn delete_row_table_doesnt_exist() {
-        let mut sim = Simulator::new(GenericDialect {});
+        let mut sim = Simulator::default();
 
         assert_eq!(
             sim.execute("delete from person where weight = ?"),
@@ -119,7 +119,7 @@ mod tests {
 
     #[test]
     fn delete_row_join() {
-        let mut sim = Simulator::new(GenericDialect {});
+        let mut sim = Simulator::default();
         sim.execute("create table person (id int primary key, name text)")
             .unwrap();
         sim.execute(

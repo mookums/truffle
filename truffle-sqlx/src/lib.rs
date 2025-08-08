@@ -9,7 +9,7 @@ use syn::{
     parse::{Parse, discouraged::Speculative},
     parse_quote,
 };
-use truffle::{Simulator, ty::SqlType};
+use truffle::{DialectKind, Simulator, ty::SqlType};
 use truffle_loader::{
     config::load_config,
     migrations::{apply_migrations, load_migrations},
@@ -17,8 +17,9 @@ use truffle_loader::{
 
 static SIMULATOR: LazyLock<Result<Simulator, Error>> = LazyLock::new(|| {
     let config = load_config().map_err(|e| Error::new(Span::call_site().into(), e.to_string()))?;
+    eprintln!("Config: {config:?}");
 
-    let mut sim = Simulator::with_config(&config);
+    let mut sim = Simulator::with_dialect(config.dialect);
 
     let migrations = load_migrations(&config)
         .map_err(|e| Error::new(Span::call_site().into(), e.to_string()))?;
@@ -127,7 +128,7 @@ fn sql_type_to_rust_type(sql_type: &SqlType) -> syn::Type {
     }
 }
 
-/// Validates the syntax and semantics of your SQL at compile time.
+// Validates the syntax and semantics of your SQL at compile time.
 #[proc_macro]
 pub fn query(input: TokenStream) -> TokenStream {
     let parsed = syn::parse_macro_input!(input as QueryInput);
@@ -183,7 +184,7 @@ pub fn query(input: TokenStream) -> TokenStream {
     })
 }
 
-/// Validates the syntax and semantics of your SQL at compile time.
+// Validates the syntax and semantics of your SQL at compile time.
 #[proc_macro]
 pub fn query_as(input: TokenStream) -> TokenStream {
     let parsed = syn::parse_macro_input!(input as QueryAsInput);
@@ -246,18 +247,25 @@ pub fn query_as(input: TokenStream) -> TokenStream {
                 let rust_type = sql_type_to_rust_type(&col.ty);
 
                 quote! {
-                    #field_ident: row.try_get::<'_, #rust_type, _>(#field_name)?.into(),
+                    #field_ident: row.try_get_unchecked::<#rust_type, _>(#field_name)?.into(),
                 }
             })
             .collect();
+
+        let row_type: syn::Type = match sim.kind {
+            DialectKind::Generic | DialectKind::Ansi => {
+                panic!("Must use a real database dialect instead of {:?}", sim.kind)
+            }
+            DialectKind::Sqlite => parse_quote!(sqlx::sqlite::SqliteRow),
+            DialectKind::Postgres => parse_quote!(sqlx::postgres::PostgresRow),
+        };
 
         // Run your SQL.
         TokenStream::from(quote! {
             {
                 #(#conversions)*
                 sqlx::query(#sql)#(.bind(#binding_names))*
-                      // TODO: Support other DBs
-                      .try_map(|row: sqlx::sqlite::SqliteRow| {
+                      .try_map(|row: #row_type| {
                           use sqlx::Row as _;
                           Ok(#ty { #(#fields)* })
                 })

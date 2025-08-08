@@ -7,7 +7,7 @@ mod table;
 pub mod ty;
 
 pub use misc::config::Config;
-use misc::config::DialectKind;
+pub use misc::config::DialectKind;
 use misc::immutable::Immutable;
 
 use resolve::ResolvedQuery;
@@ -71,6 +71,7 @@ pub enum Error {
 
 #[derive(Debug, Clone)]
 pub struct Simulator {
+    pub kind: DialectKind,
     dialect: Immutable<Arc<dyn Dialect>>,
     tables: HashMap<String, Table>,
 }
@@ -82,22 +83,33 @@ fn object_name_to_strings(name: &ObjectName) -> Vec<String> {
         .collect()
 }
 
+impl Default for Simulator {
+    fn default() -> Self {
+        Self {
+            kind: DialectKind::Generic,
+            dialect: Immutable::new(Arc::new(GenericDialect {})),
+            tables: HashMap::new(),
+        }
+    }
+}
+
 impl Simulator {
     /// Construct a new Simulator with the given SQL Dialect.
-    pub fn new<D: Dialect>(dialect: D) -> Self {
+    fn create<D: Dialect>(dialect: D, kind: DialectKind) -> Self {
         Self {
+            kind,
             dialect: Immutable::new(Arc::new(dialect)),
             tables: HashMap::new(),
         }
     }
 
-    /// Construct a new Simulator using the given Config.
-    pub fn with_config(config: &Config) -> Self {
-        match config.dialect {
-            DialectKind::Generic => Simulator::new(GenericDialect {}),
-            DialectKind::Ansi => Simulator::new(AnsiDialect {}),
-            DialectKind::Sqlite => Simulator::new(SQLiteDialect {}),
-            DialectKind::Postgres => Simulator::new(PostgreSqlDialect {}),
+    // Construct a new Simulator with the given Dialect.
+    pub fn with_dialect(kind: DialectKind) -> Self {
+        match kind {
+            DialectKind::Generic => Simulator::create(GenericDialect {}, DialectKind::Generic),
+            DialectKind::Ansi => Simulator::create(AnsiDialect {}, DialectKind::Ansi),
+            DialectKind::Sqlite => Simulator::create(SQLiteDialect {}, DialectKind::Sqlite),
+            DialectKind::Postgres => Simulator::create(PostgreSqlDialect {}, DialectKind::Postgres),
         }
     }
 
@@ -146,7 +158,7 @@ mod tests {
 
     #[test]
     fn invalid_sql() {
-        let mut sim = Simulator::new(GenericDialect {});
+        let mut sim = Simulator::default();
         assert!(matches!(
             sim.execute("create eveyrthing (id int);"),
             Err(Error::Parsing(_))

@@ -2,7 +2,8 @@ use std::{fs, path::Path};
 use truffle::Config;
 
 pub fn load_config() -> Result<Config, String> {
-    let manifest_str = std::env::var("CARGO_MANIFEST_DIR").unwrap();
+    let manifest_str =
+        std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR must be defined");
     let manifest_dir = Path::new(&manifest_str);
     let config_file = manifest_dir
         .join("truffle.toml")
