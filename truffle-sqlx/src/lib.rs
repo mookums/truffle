@@ -257,7 +257,7 @@ pub fn query_as(input: TokenStream) -> TokenStream {
                 panic!("Must use a real database dialect instead of {:?}", sim.kind)
             }
             DialectKind::Sqlite => parse_quote!(sqlx::sqlite::SqliteRow),
-            DialectKind::Postgres => parse_quote!(sqlx::postgres::PostgresRow),
+            DialectKind::Postgres => parse_quote!(sqlx::postgres::PgRow),
         };
 
         // Run your SQL.
