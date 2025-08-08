@@ -155,9 +155,16 @@ pub fn query_as(input: TokenStream) -> TokenStream {
 
     // Ensure that we have matched all of the placeholders.
     if resolve.inputs.len() != parsed.placeholders.len() {
-        return Error::new(parsed.sql_lit.span(), "Unmatched placeholders".to_string())
-            .to_compile_error()
-            .into();
+        return Error::new(
+            parsed.sql_lit.span(),
+            format!(
+                "Expected {} placeholders but got {}",
+                resolve.inputs.len(),
+                parsed.placeholders.len()
+            ),
+        )
+        .to_compile_error()
+        .into();
     }
 
     let bindings: Vec<_> = resolve
