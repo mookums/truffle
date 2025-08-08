@@ -99,6 +99,7 @@ pub fn query(input: TokenStream) -> TokenStream {
     };
 
     // Ensure that we have matched all of the placeholders.
+    // TODO: we only really only care if they are different as multiple `$1` is 1.
     if resolve.inputs.len() != parsed.placeholders.len() {
         return Error::new(parsed.sql_lit.span(), "Unmatched placeholders".to_string())
             .to_compile_error()
@@ -186,6 +187,19 @@ pub fn query_as(input: TokenStream) -> TokenStream {
         .collect::<Vec<_>>();
 
     let (conversions, binding_names): (Vec<_>, Vec<_>) = bindings.into_iter().unzip();
+
+    // try directly casting into the given type.
+    // this would require from/into for each type so we would need a secondary set of type checks.
+    //
+    // but then we should try to do:
+    //
+    // sqlx::query_as::<_, #given_type>(#sql)#(.bind(#binding_names))*
+    //       .try_map(|row| {
+    //           use ::sqlx::Row as _;
+    //           Ok(#given_type {
+    //               #(#field_name: row.try_get(#i)?.into()),*
+    //           })
+    //       })
 
     let result_fields: Vec<_> = resolve
         .output_iter()

@@ -1,4 +1,4 @@
-use sqlparser::ast::{Insert, SetExpr, TableObject};
+use sqlparser::ast::{Insert, SelectItem, SetExpr, TableObject};
 
 use crate::{
     Error, Simulator,
@@ -88,7 +88,18 @@ impl Simulator {
             _ => todo!(),
         }
 
-        if let Some(_returning) = ins.returning {
+        if let Some(returning) = ins.returning {
+            for item in returning {
+                match item {
+                    SelectItem::UnnamedExpr(expr) => todo!(),
+                    SelectItem::ExprWithAlias { expr, alias } => todo!(),
+                    SelectItem::QualifiedWildcard(
+                        select_item_qualified_wildcard_kind,
+                        wildcard_additional_options,
+                    ) => todo!(),
+                    SelectItem::Wildcard(wildcard_additional_options) => todo!(),
+                }
+            }
             // TODO: properly parsing what fields we are returning.
         }
 
