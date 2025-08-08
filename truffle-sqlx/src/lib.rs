@@ -251,6 +251,7 @@ pub fn query_as(input: TokenStream) -> TokenStream {
             })
             .collect();
 
+        // Run your SQL.
         TokenStream::from(quote! {
             {
                 #(#conversions)*

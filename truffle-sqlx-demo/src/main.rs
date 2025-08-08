@@ -57,17 +57,10 @@ async fn main() {
     .await
     .unwrap();
 
-    let account = truffle_sqlx::query_as!(
-        Account,
-        r#"
-        select * from account
-        where id = ?
-        "#,
-        0
-    )
-    .fetch_one(&db)
-    .await
-    .unwrap();
+    let account = truffle_sqlx::query_as!(Account, "select * from account where id = ?", 0)
+        .fetch_one(&db)
+        .await
+        .unwrap();
 
     let id_name: (String, AccountStatus) =
         truffle_sqlx::query_as!("select name, status from account where id = ?", 0)
