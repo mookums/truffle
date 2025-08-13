@@ -31,12 +31,12 @@ impl Simulator {
                 ));
             };
 
-            let from_table_name = object_name_to_strings(name).first().unwrap().clone();
-            let from_table_alias = alias.as_ref().map(|a| a.name.value.clone());
+            let from_table_name = &object_name_to_strings(name)[0];
+            let from_table_alias = alias.as_ref().map(|a| &a.name.value);
 
             // Ensure the table exists.
             let from_table = self
-                .get_table(&from_table_name)
+                .get_table(from_table_name)
                 .ok_or_else(|| Error::TableDoesntExist(from_table_name.clone()))?;
 
             // Ensure that the alias isn't a table name.
@@ -48,8 +48,8 @@ impl Simulator {
 
             let join_table = self.infer_joins(
                 from_table,
-                &from_table_name,
-                from_table_alias.as_ref(),
+                from_table_name,
+                from_table_alias,
                 &from.joins,
                 &mut resolved,
             )?;
@@ -94,7 +94,7 @@ impl Simulator {
                 }
                 SelectItem::QualifiedWildcard(kind, _) => match kind {
                     SelectItemQualifiedWildcardKind::ObjectName(name) => {
-                        let qualifier = object_name_to_strings(name).first().unwrap().clone();
+                        let qualifier = object_name_to_strings(name)[0].clone();
                         columns
                             .expect_list_mut()
                             .push(SelectColumn::Wildcard(qualifier));
@@ -1602,7 +1602,8 @@ mod tests {
 
         assert_eq!(resolve.outputs.len(), 3);
         resolve
-            .output_iter()
+            .outputs
+            .iter()
             .map(|(k, t)| (k, &t.ty))
             .for_each(|(key, ty)| match key.name.as_ref() {
                 "id" => assert!(ty == &SqlType::Integer),
@@ -1624,7 +1625,8 @@ mod tests {
 
         assert_eq!(resolve.outputs.len(), 3);
         resolve
-            .output_iter()
+            .outputs
+            .iter()
             .map(|(k, t)| (k, &t.ty))
             .for_each(|(key, ty)| match key.name.as_ref() {
                 "id" => assert!(ty == &SqlType::Integer),

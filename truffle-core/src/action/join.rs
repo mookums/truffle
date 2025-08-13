@@ -30,11 +30,11 @@ impl Simulator {
         for join in joins {
             match &join.relation {
                 TableFactor::Table { name, alias, .. } => {
-                    let right_table_name = object_name_to_strings(name).first().unwrap().clone();
-                    let right_table_alias = alias.as_ref().map(|a| a.name.value.clone());
+                    let right_table_name = &object_name_to_strings(name)[0];
+                    let right_table_alias = alias.as_ref().map(|a| &a.name.value);
 
                     let right_table = self
-                        .get_table(&right_table_name)
+                        .get_table(right_table_name)
                         .ok_or_else(|| Error::TableDoesntExist(right_table_name.clone()))?;
 
                     if let Some(alias) = &right_table_alias
@@ -49,8 +49,8 @@ impl Simulator {
                             join_constraint,
                             &mut join_ctx,
                             right_table,
-                            &right_table_name,
-                            right_table_alias.as_ref(),
+                            right_table_name,
+                            right_table_alias,
                             resolved,
                         )?,
                         JoinOperator::Left(join_constraint)
@@ -58,8 +58,8 @@ impl Simulator {
                             join_constraint,
                             &mut join_ctx,
                             right_table,
-                            &right_table_name,
-                            right_table_alias.as_ref(),
+                            right_table_name,
+                            right_table_alias,
                             resolved,
                         )?,
                         JoinOperator::Right(join_constraint)
@@ -68,16 +68,16 @@ impl Simulator {
                                 join_constraint,
                                 &mut join_ctx,
                                 right_table,
-                                &right_table_name,
-                                right_table_alias.as_ref(),
+                                right_table_name,
+                                right_table_alias,
                                 resolved,
                             )?,
                         JoinOperator::FullOuter(join_constraint) => self.handle_join_constraint(
                             join_constraint,
                             &mut join_ctx,
                             right_table,
-                            &right_table_name,
-                            right_table_alias.as_ref(),
+                            right_table_name,
+                            right_table_alias,
                             resolved,
                         )?,
                         JoinOperator::CrossJoin => join_ctx.join_table(

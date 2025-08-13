@@ -17,7 +17,6 @@ use truffle_loader::{
 
 static SIMULATOR: LazyLock<Result<Simulator, Error>> = LazyLock::new(|| {
     let config = load_config().map_err(|e| Error::new(Span::call_site().into(), e.to_string()))?;
-    eprintln!("Config: {config:?}");
 
     let mut sim = Simulator::with_dialect(config.dialect);
 
@@ -151,13 +150,21 @@ pub fn query(input: TokenStream) -> TokenStream {
     // Ensure that we have matched all of the placeholders.
     // TODO: we only really only care if they are different as multiple `$1` is 1.
     if resolve.inputs.len() != parsed.placeholders.len() {
-        return Error::new(parsed.sql_lit.span(), "Unmatched placeholders".to_string())
-            .to_compile_error()
-            .into();
+        return Error::new(
+            parsed.sql_lit.span(),
+            format!(
+                "Expected {} placeholders but got {}",
+                resolve.inputs.len(),
+                parsed.placeholders.len()
+            ),
+        )
+        .to_compile_error()
+        .into();
     }
 
     let bindings: Vec<_> = resolve
-        .input_iter()
+        .inputs
+        .iter()
         .zip(parsed.placeholders.iter())
         .enumerate()
         .map(|(i, (sql_type, rust_expr))| {
@@ -219,7 +226,8 @@ pub fn query_as(input: TokenStream) -> TokenStream {
     }
 
     let bindings: Vec<_> = resolve
-        .input_iter()
+        .inputs
+        .iter()
         .zip(parsed.placeholders.iter())
         .enumerate()
         .map(|(i, (sql_type, rust_expr))| {
@@ -240,7 +248,8 @@ pub fn query_as(input: TokenStream) -> TokenStream {
 
     if let Some(ty) = parsed.ty {
         let fields: Vec<_> = resolve
-            .output_iter()
+            .outputs
+            .iter()
             .map(|(name, col)| {
                 let field_name = &name.name;
                 let field_ident = syn::Ident::new(field_name, Span::call_site().into());
@@ -273,7 +282,8 @@ pub fn query_as(input: TokenStream) -> TokenStream {
         })
     } else {
         let result_fields: Vec<_> = resolve
-            .output_iter()
+            .outputs
+            .iter()
             .map(|(name, col)| {
                 let base_type = sql_type_to_rust_type(&col.ty);
 

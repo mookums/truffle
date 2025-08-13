@@ -1,8 +1,4 @@
-use std::{
-    collections::{HashMap, hash_map},
-    fmt::Display,
-    slice,
-};
+use std::{collections::HashMap, fmt::Display};
 
 use crate::{column::Column, ty::SqlType};
 use itertools::Itertools;
@@ -70,8 +66,19 @@ impl ResolvedQuery {
 
     pub fn insert_input(&mut self, placeholder: impl AsRef<str>, sql_type: SqlType) {
         if let Some(index) = parse_placeholder(placeholder) {
-            let true_index = (index - 1).min(self.inputs.len());
-            self.inputs.insert(true_index, sql_type);
+            let idx = index - 1;
+
+            if idx < self.inputs.len() {
+                // Replace existing entry at index.
+                //
+                // TODO: Ensure that the sql types here are identical INSTEAD of replacing it.
+                // It should then error if they are different types as they can't share a placeholder.
+                _ = std::mem::replace(&mut self.inputs[idx], sql_type);
+            } else {
+                // Extend the Vec then insert.
+                self.inputs.resize_with(index, || SqlType::Null);
+                self.inputs[idx] = sql_type;
+            }
         } else {
             self.inputs.push(sql_type);
         }
@@ -79,10 +86,6 @@ impl ResolvedQuery {
 
     pub fn insert_input_at(&mut self, index: usize, sql_type: SqlType) {
         self.inputs.insert(index.min(self.inputs.len()), sql_type);
-    }
-
-    pub fn input_iter(&self) -> slice::Iter<'_, SqlType> {
-        self.inputs.iter()
     }
 
     pub fn insert_output(&mut self, key: ResolveOutputKey, col: Column) {
@@ -108,10 +111,6 @@ impl ResolvedQuery {
             .ok()
             .flatten()
             .map(|c| c.1)
-    }
-
-    pub fn output_iter(&self) -> hash_map::Iter<'_, ResolveOutputKey, Column> {
-        self.outputs.iter()
     }
 }
 

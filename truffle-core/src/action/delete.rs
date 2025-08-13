@@ -21,11 +21,11 @@ impl Simulator {
                             "Unsupported DELETE relation".to_string(),
                         ));
                     };
-                    let from_table_name = object_name_to_strings(name).first().unwrap().clone();
-                    let from_table_alias = alias.as_ref().map(|a| a.name.value.clone());
+                    let from_table_name = &object_name_to_strings(name)[0];
+                    let from_table_alias = alias.as_ref().map(|a| &a.name.value);
 
                     let from_table = self
-                        .get_table(&from_table_name)
+                        .get_table(from_table_name)
                         .ok_or_else(|| Error::TableDoesntExist(from_table_name.clone()))?;
 
                     if let Some(alias) = &from_table_alias {
@@ -36,8 +36,8 @@ impl Simulator {
 
                     let join_table = self.infer_joins(
                         from_table,
-                        &from_table_name,
-                        from_table_alias.as_ref(),
+                        from_table_name,
+                        from_table_alias,
                         &from.joins,
                         &mut resolved,
                     )?;

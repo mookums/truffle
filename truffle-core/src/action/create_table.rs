@@ -16,11 +16,11 @@ impl Simulator {
         &mut self,
         create_table: CreateTable,
     ) -> Result<ResolvedQuery, Error> {
-        let name = object_name_to_strings(&create_table.name).pop().unwrap();
+        let name = &object_name_to_strings(&create_table.name)[0];
 
         // Ensure that this table doesn't already exist.
-        if !create_table.if_not_exists && self.tables.contains_key(&name) {
-            return Err(Error::TableAlreadyExists(name));
+        if !create_table.if_not_exists && self.tables.contains_key(name) {
+            return Err(Error::TableAlreadyExists(name.to_string()));
         }
 
         let mut resolved = ResolvedQuery::default();
@@ -277,7 +277,7 @@ impl Simulator {
         }
 
         debug!(name = %name, "Creating Table");
-        self.tables.insert(name, table);
+        self.tables.insert(name.to_string(), table);
 
         Ok(ResolvedQuery::default())
     }

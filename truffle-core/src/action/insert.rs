@@ -1,10 +1,13 @@
-use sqlparser::ast::{Insert, SelectItem, SetExpr, TableObject};
+use sqlparser::ast::{
+    Expr, Insert, SelectItem, SelectItemQualifiedWildcardKind, SetExpr, TableObject,
+};
 
 use crate::{
     Error, Simulator,
     expr::{ColumnInferrer, InferType},
     object_name_to_strings,
-    resolve::ResolvedQuery,
+    resolve::{ResolveOutputKey, ResolvedQuery},
+    ty::SqlType,
 };
 
 impl Simulator {
@@ -13,14 +16,13 @@ impl Simulator {
             todo!();
         };
 
-        let table_name = object_name_to_strings(&table_object_name)
-            .first()
-            .unwrap()
-            .clone();
+        // Only POSTGRES uses this.
+        let alias = ins.table_alias.map(|i| i.value);
+        let table_name = &object_name_to_strings(&table_object_name)[0];
 
         let table = self
-            .get_table(&table_name)
-            .ok_or(Error::TableDoesntExist(table_name))?;
+            .get_table(table_name)
+            .ok_or_else(|| Error::TableDoesntExist(table_name.clone()))?;
 
         let mut provided_columns = vec![];
         for column in ins.columns {
@@ -85,23 +87,102 @@ impl Simulator {
                     }
                 }
             }
-            _ => todo!(),
+            _ => todo!("Unexpected body for INSERT"),
         }
 
-        // if let Some(returning) = ins.returning {
-        //     for item in returning {
-        //         match item {
-        //             SelectItem::UnnamedExpr(expr) => todo!(),
-        //             SelectItem::ExprWithAlias { expr, alias } => todo!(),
-        //             SelectItem::QualifiedWildcard(
-        //                 select_item_qualified_wildcard_kind,
-        //                 wildcard_additional_options,
-        //             ) => todo!(),
-        //             SelectItem::Wildcard(wildcard_additional_options) => todo!(),
-        //         }
-        //     }
-        //     // TODO: properly parsing what fields we are returning.
-        // }
+        if let Some(returning) = ins.returning {
+            for item in returning {
+                match item {
+                    SelectItem::UnnamedExpr(expr) => match expr {
+                        Expr::Identifier(ident) => {
+                            let value = ident.value.clone();
+
+                            if let Some(column) = table.get_column(&value) {
+                                resolved.insert_output(
+                                    ResolveOutputKey {
+                                        qualifier: Some(table_name.clone()),
+                                        name: value,
+                                    },
+                                    column.clone(),
+                                );
+                            } else {
+                                return Err(Error::ColumnDoesntExist(value.to_string()));
+                            }
+                        }
+                        Expr::CompoundIdentifier(idents) => {
+                            let qualifier = &idents.first().unwrap().value;
+                            let column_name = &idents.get(1).unwrap().value;
+
+                            if qualifier == table_name
+                                || alias.as_ref().is_some_and(|a| a == qualifier)
+                            {
+                                let column = table.get_column(column_name).ok_or_else(|| {
+                                    Error::ColumnDoesntExist(column_name.to_string())
+                                })?;
+
+                                resolved.insert_output(
+                                    ResolveOutputKey {
+                                        qualifier: Some(qualifier.clone()),
+                                        name: column_name.clone(),
+                                    },
+                                    column.clone(),
+                                );
+                            } else {
+                                return Err(Error::QualifierDoesntExist(qualifier.to_string()));
+                            }
+                        }
+                        _ => {
+                            return Err(Error::Unsupported(format!(
+                                "Unsupported Select Expr: {expr:?}"
+                            )));
+                        }
+                    },
+                    SelectItem::ExprWithAlias { expr, alias } => {
+                        return Err(Error::Unsupported(format!(
+                            "Unsupported Select Expr with Alias: expr={expr}, alias={alias}"
+                        )));
+                    }
+                    SelectItem::QualifiedWildcard(kind, _) => match kind {
+                        SelectItemQualifiedWildcardKind::ObjectName(name) => {
+                            let qualifier = &object_name_to_strings(&name)[0];
+
+                            if qualifier == table_name
+                                || alias.as_ref().is_some_and(|a| a == qualifier)
+                            {
+                                for column in table.columns.iter() {
+                                    resolved.insert_output(
+                                        ResolveOutputKey {
+                                            qualifier: Some(qualifier.clone()),
+                                            name: column.0.to_string(),
+                                        },
+                                        column.1.clone(),
+                                    );
+                                }
+                            } else {
+                                return Err(Error::QualifierDoesntExist(qualifier.to_string()));
+                            }
+                        }
+                        SelectItemQualifiedWildcardKind::Expr(_) => {
+                            return Err(Error::Unsupported(
+                                "Expression as qualifier for wildcard in SELECT".to_string(),
+                            ));
+                        }
+                    },
+
+                    SelectItem::Wildcard(_) => {
+                        for column in table.columns.iter() {
+                            resolved.insert_output(
+                                ResolveOutputKey {
+                                    qualifier: Some(table_name.clone()),
+                                    name: column.0.to_string(),
+                                },
+                                column.1.clone(),
+                            );
+                        }
+                    }
+                }
+            }
+        }
 
         Ok(resolved)
     }
@@ -111,22 +192,13 @@ impl Simulator {
 struct InsertInferrer {}
 
 impl ColumnInferrer for InsertInferrer {
-    fn infer_unqualified_type(
-        &self,
-        _: &Simulator,
-        _: &str,
-    ) -> Result<Option<crate::ty::SqlType>, Error> {
+    fn infer_unqualified_type(&self, _: &Simulator, _: &str) -> Result<Option<SqlType>, Error> {
         Err(Error::Unsupported(
             "Can't infer values in INSERT".to_string(),
         ))
     }
 
-    fn infer_qualified_type(
-        &self,
-        _: &Simulator,
-        _: &str,
-        _: &str,
-    ) -> Result<crate::ty::SqlType, Error> {
+    fn infer_qualified_type(&self, _: &Simulator, _: &str, _: &str) -> Result<SqlType, Error> {
         Err(Error::Unsupported(
             "Can't infer values in INSERT".to_string(),
         ))
@@ -291,5 +363,174 @@ mod tests {
         assert_eq!(resolve.get_input(0).unwrap(), &SqlType::Text);
         assert_eq!(resolve.get_input(1).unwrap(), &SqlType::Float);
         assert_eq!(resolve.get_input(2).unwrap(), &SqlType::Integer);
+    }
+
+    #[test]
+    fn insert_resolved_inputs_numbered_repeating() {
+        let mut sim = Simulator::default();
+        sim.execute("create table person (id integer not null, name text not null, age integer not null, weight float default 10.2)").unwrap();
+
+        let resolve = sim
+            .execute("insert into person (id, name, weight, age) values($3, $1, $2, $2)")
+            .unwrap();
+
+        assert_eq!(resolve.inputs.len(), 3);
+        assert_eq!(resolve.get_input(0).unwrap(), &SqlType::Text);
+        assert_eq!(resolve.get_input(1).unwrap(), &SqlType::Float);
+        assert_eq!(resolve.get_input(2).unwrap(), &SqlType::Integer);
+    }
+
+    #[test]
+    fn insert_with_returning_wildcard() {
+        let mut sim = Simulator::default();
+        sim.execute("create table person (id integer not null, name text not null, weight float default 10.2)").unwrap();
+
+        let resolve = sim
+            .execute("insert into person (id, name, weight) values($1, $2, $3) returning *")
+            .unwrap();
+
+        assert_eq!(resolve.inputs.len(), 3);
+        assert_eq!(resolve.get_input(0).unwrap(), &SqlType::Integer);
+        assert_eq!(resolve.get_input(1).unwrap(), &SqlType::Text);
+        assert_eq!(resolve.get_input(2).unwrap(), &SqlType::Float);
+
+        assert_eq!(resolve.outputs.len(), 3);
+        assert_eq!(
+            resolve.get_output_with_name("id").unwrap().ty,
+            SqlType::Integer
+        );
+        assert_eq!(
+            resolve.get_output_with_name("name").unwrap().ty,
+            SqlType::Text
+        );
+        assert_eq!(
+            resolve.get_output_with_name("weight").unwrap().ty,
+            SqlType::Float
+        );
+    }
+
+    #[test]
+    fn insert_with_returning_qualified_wildcard() {
+        let mut sim = Simulator::default();
+        sim.execute("create table person (id integer not null, name text not null, weight float default 10.2)").unwrap();
+
+        let resolve = sim
+            .execute("insert into person (id, name, weight) values($1, $2, $3) returning person.*")
+            .unwrap();
+
+        assert_eq!(resolve.inputs.len(), 3);
+        assert_eq!(resolve.get_input(0).unwrap(), &SqlType::Integer);
+        assert_eq!(resolve.get_input(1).unwrap(), &SqlType::Text);
+        assert_eq!(resolve.get_input(2).unwrap(), &SqlType::Float);
+
+        assert_eq!(resolve.outputs.len(), 3);
+        assert_eq!(
+            resolve.get_output_with_name("id").unwrap().ty,
+            SqlType::Integer
+        );
+        assert_eq!(
+            resolve.get_output_with_name("name").unwrap().ty,
+            SqlType::Text
+        );
+        assert_eq!(
+            resolve.get_output_with_name("weight").unwrap().ty,
+            SqlType::Float
+        );
+    }
+
+    #[test]
+    fn insert_with_returning_single() {
+        let mut sim = Simulator::default();
+        sim.execute("create table person (id integer not null, name text not null, weight float default 10.2)").unwrap();
+
+        let resolve = sim
+            .execute("insert into person (id, name, weight) values($1, $2, $3) returning id")
+            .unwrap();
+
+        assert_eq!(resolve.inputs.len(), 3);
+        assert_eq!(resolve.get_input(0).unwrap(), &SqlType::Integer);
+        assert_eq!(resolve.get_input(1).unwrap(), &SqlType::Text);
+        assert_eq!(resolve.get_input(2).unwrap(), &SqlType::Float);
+
+        assert_eq!(resolve.outputs.len(), 1);
+        assert_eq!(
+            resolve.get_output_with_name("id").unwrap().ty,
+            SqlType::Integer
+        );
+    }
+
+    #[test]
+    fn insert_with_returning_qualified_single() {
+        let mut sim = Simulator::default();
+        sim.execute("create table person (id integer not null, name text not null, weight float default 10.2)").unwrap();
+
+        let resolve = sim
+            .execute("insert into person (id, name, weight) values($1, $2, $3) returning person.id")
+            .unwrap();
+
+        assert_eq!(resolve.inputs.len(), 3);
+        assert_eq!(resolve.get_input(0).unwrap(), &SqlType::Integer);
+        assert_eq!(resolve.get_input(1).unwrap(), &SqlType::Text);
+        assert_eq!(resolve.get_input(2).unwrap(), &SqlType::Float);
+
+        assert_eq!(resolve.outputs.len(), 1);
+        assert_eq!(
+            resolve.get_output_with_name("id").unwrap().ty,
+            SqlType::Integer
+        );
+    }
+
+    #[test]
+    fn insert_with_returning_aliased_wildcard_postgres() {
+        let mut sim = Simulator::with_dialect(DialectKind::Postgres);
+        sim.execute("create table person (id integer not null, name text not null, weight float default 10.2)").unwrap();
+
+        let resolve = sim
+            .execute("insert into person as p (id, name, weight) values($1, $2, $3) returning p.*")
+            .unwrap();
+
+        assert_eq!(resolve.inputs.len(), 3);
+        assert_eq!(resolve.get_input(0).unwrap(), &SqlType::Integer);
+        assert_eq!(resolve.get_input(1).unwrap(), &SqlType::Text);
+        assert_eq!(resolve.get_input(2).unwrap(), &SqlType::Float);
+
+        assert_eq!(resolve.outputs.len(), 3);
+        assert_eq!(
+            resolve.get_output_with_name("id").unwrap().ty,
+            SqlType::Integer
+        );
+        assert_eq!(
+            resolve.get_output_with_name("name").unwrap().ty,
+            SqlType::Text
+        );
+        assert_eq!(
+            resolve.get_output_with_name("weight").unwrap().ty,
+            SqlType::Float
+        );
+    }
+
+    #[test]
+    fn insert_with_returning_aliased_fields_postgres() {
+        let mut sim = Simulator::with_dialect(DialectKind::Postgres);
+        sim.execute("create table person (id integer not null, name text not null, weight float default 10.2)").unwrap();
+
+        let resolve = sim
+            .execute("insert into person as p (id, name, weight) values($1, $2, $3) returning p.id, p.weight")
+            .unwrap();
+
+        assert_eq!(resolve.inputs.len(), 3);
+        assert_eq!(resolve.get_input(0).unwrap(), &SqlType::Integer);
+        assert_eq!(resolve.get_input(1).unwrap(), &SqlType::Text);
+        assert_eq!(resolve.get_input(2).unwrap(), &SqlType::Float);
+
+        assert_eq!(resolve.outputs.len(), 2);
+        assert_eq!(
+            resolve.get_output_with_name("id").unwrap().ty,
+            SqlType::Integer
+        );
+        assert_eq!(
+            resolve.get_output_with_name("weight").unwrap().ty,
+            SqlType::Float
+        );
     }
 }

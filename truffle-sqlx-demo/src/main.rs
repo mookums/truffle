@@ -45,7 +45,7 @@ async fn main() {
     truffle_sqlx::query!(
         r#"
         insert into account
-        values (?, ?, ?, ?, ?);
+        values ($1, $2, $3, $4, $5);
         "#,
         0,
         "John Doe",
@@ -62,7 +62,7 @@ async fn main() {
         .await
         .unwrap();
 
-    let id_name: (String, AccountStatus) =
+    let name_status: (String, AccountStatus) =
         truffle_sqlx::query_as!("select name, status from account where id = ?", 0)
             .fetch_one(&db)
             .await
@@ -70,5 +70,5 @@ async fn main() {
             .unwrap();
 
     println!("Fetched Item: {account:?}");
-    println!("Item Pair: {id_name:?}");
+    println!("Item Pair: {name_status:?}");
 }
