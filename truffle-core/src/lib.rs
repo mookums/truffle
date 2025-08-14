@@ -23,7 +23,7 @@ use table::Table;
 
 #[derive(Debug, PartialEq, Eq, thiserror::Error)]
 pub enum Error {
-    #[error("Parsing: {0}")]
+    #[error("{0}")]
     Parsing(#[from] sqlparser::parser::ParserError),
     #[error("SQL: {0}")]
     Sql(String),
@@ -65,6 +65,8 @@ pub enum Error {
     RequiredColumnMissing(String),
     #[error("No common column")]
     NoCommonColumn,
+    #[error("Missing placeholder '${0}'")]
+    MissingPlaceholder(usize),
     #[error("'{0}' is currently unsupported")]
     Unsupported(String),
 }
@@ -146,6 +148,12 @@ impl Simulator {
                 } => self.drop(&object_type, names)?,
                 _ => return Err(Error::Unsupported(statement.to_string())),
             };
+
+            for (i, col) in resolved.inputs.iter().enumerate() {
+                if col.ty == SqlType::Null {
+                    return Err(Error::MissingPlaceholder(i));
+                }
+            }
         }
 
         Ok(resolved)

@@ -8,7 +8,7 @@ name = "truffle"
 path = "src/main.rs"
 
 [dependencies]
-truffle = { path = "../truffle-core" }
+truffle = { path = "../truffle-core", features = [ "all" ] }
 serde.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true

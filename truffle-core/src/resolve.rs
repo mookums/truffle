@@ -40,8 +40,8 @@ impl Display for ResolvedQuery {
         if self.inputs.is_empty() {
             writeln!(f, "  (none)")?;
         } else {
-            for (i, input) in self.inputs.iter().enumerate() {
-                writeln!(f, "  ${}: {}", i + 1, input)?;
+            for (i, column) in self.inputs.iter().enumerate() {
+                writeln!(f, "  ${}: {column}", i + 1)?;
             }
         }
 
