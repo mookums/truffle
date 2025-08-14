@@ -1,4 +1,4 @@
-use std::fmt::Display;
+use std::{fmt::Display, hash::Hash};
 
 use itertools::Itertools;
 use sqlparser::ast::DataType;
@@ -6,13 +6,15 @@ use sqlparser::ast::DataType;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
+use crate::column::Column;
+
 #[cfg_attr(feature = "serde", derive(Deserialize, Serialize))]
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Eq)]
 pub enum SqlType {
     // NULL
     Null,
     // Tuple of Types
-    Tuple(Vec<SqlType>),
+    Tuple(Vec<Column>),
     /// 16 bit Signed Integer
     SmallInt,
     /// 32 bit Signed Integer
@@ -62,6 +64,78 @@ impl SqlType {
     }
 }
 
+impl PartialEq for SqlType {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (SqlType::Null, SqlType::Null) => true,
+            (SqlType::Tuple(first), SqlType::Tuple(second)) => {
+                if first.len() != second.len() {
+                    return false;
+                }
+
+                first.iter().zip(second.iter()).all(|(f, s)| f.ty.eq(&s.ty))
+            }
+            (SqlType::SmallInt, SqlType::SmallInt) => true,
+            (SqlType::Integer, SqlType::Integer) => true,
+            (SqlType::BigInt, SqlType::BigInt) => true,
+            (SqlType::Float, SqlType::Float) => true,
+            (SqlType::Double, SqlType::Double) => true,
+            (SqlType::Text, SqlType::Text) => true,
+            (SqlType::Boolean, SqlType::Boolean) => true,
+            #[cfg(feature = "time")]
+            (SqlType::Date, SqlType::Date) => true,
+            #[cfg(feature = "time")]
+            (SqlType::Time, SqlType::Time) => true,
+            #[cfg(feature = "time")]
+            (SqlType::Timestamp, SqlType::Timestamp) => true,
+            #[cfg(feature = "time")]
+            (SqlType::TimestampTz, SqlType::TimestampTz) => true,
+            #[cfg(feature = "uuid")]
+            (SqlType::Uuid, SqlType::Uuid) => true,
+            #[cfg(feature = "json")]
+            (SqlType::Json, SqlType::Json) => true,
+            (SqlType::Unknown(a), SqlType::Unknown(b)) => a == b,
+            _ => false,
+        }
+    }
+}
+
+impl Hash for SqlType {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        match self {
+            SqlType::Null => state.write_u8(0),
+            SqlType::SmallInt => state.write_u8(1),
+            SqlType::Integer => state.write_u8(2),
+            SqlType::BigInt => state.write_u8(3),
+            SqlType::Float => state.write_u8(4),
+            SqlType::Double => state.write_u8(5),
+            SqlType::Text => state.write_u8(6),
+            SqlType::Boolean => state.write_u8(7),
+            #[cfg(feature = "time")]
+            SqlType::Date => state.write_u8(8),
+            #[cfg(feature = "time")]
+            SqlType::Time => state.write_u8(9),
+            #[cfg(feature = "time")]
+            SqlType::Timestamp => state.write_u8(10),
+            #[cfg(feature = "time")]
+            SqlType::TimestampTz => state.write_u8(11),
+            #[cfg(feature = "uuid")]
+            SqlType::Uuid => state.write_u8(12),
+            #[cfg(feature = "json")]
+            SqlType::Json => state.write_u8(13),
+            SqlType::Tuple(columns) => {
+                state.write_u8(14);
+                state.write_usize(columns.len());
+                columns.iter().for_each(|c| c.ty.hash(state))
+            }
+            SqlType::Unknown(text) => {
+                state.write_u8(15);
+                text.hash(state)
+            }
+        }
+    }
+}
+
 impl Display for SqlType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -86,6 +160,12 @@ impl From<DataType> for SqlType {
             }
             DataType::Double(_) | DataType::Float8 => SqlType::Double,
             DataType::Text | DataType::String(_) => SqlType::Text,
+            // TODO: Length validation.
+            DataType::Character(_)
+            | DataType::CharacterVarying(_)
+            | DataType::Char(_)
+            | DataType::Varchar(_)
+            | DataType::Nvarchar(_) => SqlType::Text,
             DataType::Bool | DataType::Boolean => SqlType::Boolean,
             #[cfg(feature = "time")]
             DataType::Date => SqlType::Date,

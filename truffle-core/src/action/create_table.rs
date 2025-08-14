@@ -4,7 +4,7 @@ use tracing::debug;
 use crate::{
     Error, Simulator,
     column::Column,
-    expr::{ColumnInferrer, InferType},
+    expr::{ColumnInferrer, InferContext},
     object_name_to_strings,
     resolve::ResolvedQuery,
     table::{Constraint, Table},
@@ -43,9 +43,9 @@ impl Simulator {
                     }
                     ColumnOption::Default(expr) => {
                         let inferrer = CreateTableInferrer::default();
-                        self.infer_expr_type(
+                        self.infer_expr_column(
                             &expr,
-                            InferType::Required(ty.clone()),
+                            InferContext::with_type(ty.clone()),
                             &inferrer,
                             &mut resolved,
                         )?;
@@ -287,15 +287,20 @@ impl Simulator {
 struct CreateTableInferrer {}
 
 impl ColumnInferrer for CreateTableInferrer {
-    fn infer_unqualified_type(
+    fn infer_unqualified_column(
         &self,
         _: &Simulator,
         column: &str,
-    ) -> Result<Option<SqlType>, Error> {
+    ) -> Result<Option<Column>, Error> {
         Err(Error::InvalidDefault(column.to_string()))
     }
 
-    fn infer_qualified_type(&self, _: &Simulator, _: &str, column: &str) -> Result<SqlType, Error> {
+    fn infer_qualified_column(
+        &self,
+        _: &Simulator,
+        _: &str,
+        column: &str,
+    ) -> Result<Column, Error> {
         Err(Error::InvalidDefault(column.to_string()))
     }
 }

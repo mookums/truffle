@@ -1,9 +1,9 @@
 use std::fmt::Display;
 
-use crate::ty::SqlType;
-
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
+
+use crate::ty::SqlType;
 
 #[cfg_attr(feature = "serde", derive(Deserialize, Serialize))]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -14,8 +14,12 @@ pub struct Column {
 }
 
 impl Column {
-    pub fn get_ty(&self) -> &SqlType {
-        &self.ty
+    pub fn new(ty: SqlType, nullable: bool, default: bool) -> Column {
+        Self {
+            ty,
+            nullable,
+            default,
+        }
     }
 }
 

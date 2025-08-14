@@ -1,7 +1,8 @@
 use sqlparser::ast::{Delete, FromTable, TableFactor};
 
 use crate::{
-    Error, Simulator, expr::InferType, object_name_to_strings, resolve::ResolvedQuery, ty::SqlType,
+    Error, Simulator, expr::InferContext, object_name_to_strings, resolve::ResolvedQuery,
+    ty::SqlType,
 };
 
 use super::join::JoinInferrer;
@@ -57,17 +58,17 @@ impl Simulator {
         };
 
         if let Some(selection) = delete.selection {
-            let ty = self.infer_expr_type(
+            let col = self.infer_expr_column(
                 &selection,
-                InferType::Required(SqlType::Boolean),
+                InferContext::with_type(SqlType::Boolean),
                 &inferrer,
                 &mut resolved,
             )?;
 
-            if ty != SqlType::Boolean {
+            if col.ty != SqlType::Boolean {
                 return Err(Error::TypeMismatch {
                     expected: SqlType::Boolean,
-                    got: ty,
+                    got: col.ty,
                 });
             }
         }
@@ -90,7 +91,7 @@ mod tests {
         let resolve = sim.execute("delete from person where id = ?").unwrap();
 
         assert_eq!(resolve.inputs.len(), 1);
-        assert_eq!(resolve.get_input(0), Some(&SqlType::Integer));
+        assert_eq!(resolve.get_input(0).unwrap().ty, SqlType::Integer);
 
         assert_eq!(resolve.outputs.len(), 0);
     }

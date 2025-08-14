@@ -29,7 +29,7 @@ impl Display for ResolveOutputKey {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ResolvedQuery {
-    pub inputs: Vec<SqlType>,
+    pub inputs: Vec<Column>,
     pub outputs: HashMap<ResolveOutputKey, Column>,
 }
 
@@ -60,11 +60,11 @@ impl Display for ResolvedQuery {
 }
 
 impl ResolvedQuery {
-    pub fn get_input(&self, index: usize) -> Option<&SqlType> {
+    pub fn get_input(&self, index: usize) -> Option<&Column> {
         self.inputs.get(index)
     }
 
-    pub fn insert_input(&mut self, placeholder: impl AsRef<str>, sql_type: SqlType) {
+    pub fn insert_input(&mut self, placeholder: impl AsRef<str>, col: Column) {
         if let Some(index) = parse_placeholder(placeholder) {
             let idx = index - 1;
 
@@ -73,19 +73,23 @@ impl ResolvedQuery {
                 //
                 // TODO: Ensure that the sql types here are identical INSTEAD of replacing it.
                 // It should then error if they are different types as they can't share a placeholder.
-                _ = std::mem::replace(&mut self.inputs[idx], sql_type);
+                _ = std::mem::replace(&mut self.inputs[idx], col);
             } else {
                 // Extend the Vec then insert.
-                self.inputs.resize_with(index, || SqlType::Null);
-                self.inputs[idx] = sql_type;
+                self.inputs.resize_with(index, || Column {
+                    ty: SqlType::Null,
+                    nullable: false,
+                    default: false,
+                });
+                self.inputs[idx] = col;
             }
         } else {
-            self.inputs.push(sql_type);
+            self.inputs.push(col);
         }
     }
 
-    pub fn insert_input_at(&mut self, index: usize, sql_type: SqlType) {
-        self.inputs.insert(index.min(self.inputs.len()), sql_type);
+    pub fn insert_input_at(&mut self, index: usize, col: Column) {
+        self.inputs.insert(index.min(self.inputs.len()), col);
     }
 
     pub fn insert_output(&mut self, key: ResolveOutputKey, col: Column) {

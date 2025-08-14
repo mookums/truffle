@@ -4,10 +4,10 @@ use sqlparser::ast::{
 
 use crate::{
     Error, Simulator,
-    expr::{ColumnInferrer, InferType},
+    column::Column,
+    expr::{ColumnInferrer, InferContext},
     object_name_to_strings,
     resolve::{ResolveOutputKey, ResolvedQuery},
-    ty::SqlType,
 };
 
 impl Simulator {
@@ -62,9 +62,9 @@ impl Simulator {
                             // Implicit (Table Index) Columns.
                             let expr = &row[i];
 
-                            _ = self.infer_expr_type(
+                            _ = self.infer_expr_column(
                                 expr,
-                                InferType::Required(column.ty.clone()),
+                                InferContext::with_column(column.clone()),
                                 &inferrer,
                                 &mut resolved,
                             )?;
@@ -74,9 +74,9 @@ impl Simulator {
                             // If the column was named explicitly...
                             let expr = &row[index];
 
-                            _ = self.infer_expr_type(
+                            _ = self.infer_expr_column(
                                 expr,
-                                InferType::Required(column.ty.clone()),
+                                InferContext::with_column(column.clone()),
                                 &inferrer,
                                 &mut resolved,
                             )?;
@@ -192,13 +192,13 @@ impl Simulator {
 struct InsertInferrer {}
 
 impl ColumnInferrer for InsertInferrer {
-    fn infer_unqualified_type(&self, _: &Simulator, _: &str) -> Result<Option<SqlType>, Error> {
+    fn infer_unqualified_column(&self, _: &Simulator, _: &str) -> Result<Option<Column>, Error> {
         Err(Error::Unsupported(
             "Can't infer values in INSERT".to_string(),
         ))
     }
 
-    fn infer_qualified_type(&self, _: &Simulator, _: &str, _: &str) -> Result<SqlType, Error> {
+    fn infer_qualified_column(&self, _: &Simulator, _: &str, _: &str) -> Result<Column, Error> {
         Err(Error::Unsupported(
             "Can't infer values in INSERT".to_string(),
         ))
@@ -346,8 +346,8 @@ mod tests {
             .unwrap();
 
         assert_eq!(resolve.inputs.len(), 2);
-        assert_eq!(resolve.get_input(0).unwrap(), &SqlType::Integer);
-        assert_eq!(resolve.get_input(1).unwrap(), &SqlType::Text);
+        assert_eq!(resolve.get_input(0).unwrap().ty, SqlType::Integer);
+        assert_eq!(resolve.get_input(1).unwrap().ty, SqlType::Text);
     }
 
     #[test]
@@ -360,9 +360,9 @@ mod tests {
             .unwrap();
 
         assert_eq!(resolve.inputs.len(), 3);
-        assert_eq!(resolve.get_input(0).unwrap(), &SqlType::Text);
-        assert_eq!(resolve.get_input(1).unwrap(), &SqlType::Float);
-        assert_eq!(resolve.get_input(2).unwrap(), &SqlType::Integer);
+        assert_eq!(resolve.get_input(0).unwrap().ty, SqlType::Text);
+        assert_eq!(resolve.get_input(1).unwrap().ty, SqlType::Float);
+        assert_eq!(resolve.get_input(2).unwrap().ty, SqlType::Integer);
     }
 
     #[test]
@@ -375,9 +375,9 @@ mod tests {
             .unwrap();
 
         assert_eq!(resolve.inputs.len(), 3);
-        assert_eq!(resolve.get_input(0).unwrap(), &SqlType::Text);
-        assert_eq!(resolve.get_input(1).unwrap(), &SqlType::Float);
-        assert_eq!(resolve.get_input(2).unwrap(), &SqlType::Integer);
+        assert_eq!(resolve.get_input(0).unwrap().ty, SqlType::Text);
+        assert_eq!(resolve.get_input(1).unwrap().ty, SqlType::Float);
+        assert_eq!(resolve.get_input(2).unwrap().ty, SqlType::Integer);
     }
 
     #[test]
@@ -390,9 +390,9 @@ mod tests {
             .unwrap();
 
         assert_eq!(resolve.inputs.len(), 3);
-        assert_eq!(resolve.get_input(0).unwrap(), &SqlType::Integer);
-        assert_eq!(resolve.get_input(1).unwrap(), &SqlType::Text);
-        assert_eq!(resolve.get_input(2).unwrap(), &SqlType::Float);
+        assert_eq!(resolve.get_input(0).unwrap().ty, SqlType::Integer);
+        assert_eq!(resolve.get_input(1).unwrap().ty, SqlType::Text);
+        assert_eq!(resolve.get_input(2).unwrap().ty, SqlType::Float);
 
         assert_eq!(resolve.outputs.len(), 3);
         assert_eq!(
@@ -419,9 +419,9 @@ mod tests {
             .unwrap();
 
         assert_eq!(resolve.inputs.len(), 3);
-        assert_eq!(resolve.get_input(0).unwrap(), &SqlType::Integer);
-        assert_eq!(resolve.get_input(1).unwrap(), &SqlType::Text);
-        assert_eq!(resolve.get_input(2).unwrap(), &SqlType::Float);
+        assert_eq!(resolve.get_input(0).unwrap().ty, SqlType::Integer);
+        assert_eq!(resolve.get_input(1).unwrap().ty, SqlType::Text);
+        assert_eq!(resolve.get_input(2).unwrap().ty, SqlType::Float);
 
         assert_eq!(resolve.outputs.len(), 3);
         assert_eq!(
@@ -448,9 +448,9 @@ mod tests {
             .unwrap();
 
         assert_eq!(resolve.inputs.len(), 3);
-        assert_eq!(resolve.get_input(0).unwrap(), &SqlType::Integer);
-        assert_eq!(resolve.get_input(1).unwrap(), &SqlType::Text);
-        assert_eq!(resolve.get_input(2).unwrap(), &SqlType::Float);
+        assert_eq!(resolve.get_input(0).unwrap().ty, SqlType::Integer);
+        assert_eq!(resolve.get_input(1).unwrap().ty, SqlType::Text);
+        assert_eq!(resolve.get_input(2).unwrap().ty, SqlType::Float);
 
         assert_eq!(resolve.outputs.len(), 1);
         assert_eq!(
@@ -469,9 +469,9 @@ mod tests {
             .unwrap();
 
         assert_eq!(resolve.inputs.len(), 3);
-        assert_eq!(resolve.get_input(0).unwrap(), &SqlType::Integer);
-        assert_eq!(resolve.get_input(1).unwrap(), &SqlType::Text);
-        assert_eq!(resolve.get_input(2).unwrap(), &SqlType::Float);
+        assert_eq!(resolve.get_input(0).unwrap().ty, SqlType::Integer);
+        assert_eq!(resolve.get_input(1).unwrap().ty, SqlType::Text);
+        assert_eq!(resolve.get_input(2).unwrap().ty, SqlType::Float);
 
         assert_eq!(resolve.outputs.len(), 1);
         assert_eq!(
@@ -490,9 +490,9 @@ mod tests {
             .unwrap();
 
         assert_eq!(resolve.inputs.len(), 3);
-        assert_eq!(resolve.get_input(0).unwrap(), &SqlType::Integer);
-        assert_eq!(resolve.get_input(1).unwrap(), &SqlType::Text);
-        assert_eq!(resolve.get_input(2).unwrap(), &SqlType::Float);
+        assert_eq!(resolve.get_input(0).unwrap().ty, SqlType::Integer);
+        assert_eq!(resolve.get_input(1).unwrap().ty, SqlType::Text);
+        assert_eq!(resolve.get_input(2).unwrap().ty, SqlType::Float);
 
         assert_eq!(resolve.outputs.len(), 3);
         assert_eq!(
@@ -519,9 +519,9 @@ mod tests {
             .unwrap();
 
         assert_eq!(resolve.inputs.len(), 3);
-        assert_eq!(resolve.get_input(0).unwrap(), &SqlType::Integer);
-        assert_eq!(resolve.get_input(1).unwrap(), &SqlType::Text);
-        assert_eq!(resolve.get_input(2).unwrap(), &SqlType::Float);
+        assert_eq!(resolve.get_input(0).unwrap().ty, SqlType::Integer);
+        assert_eq!(resolve.get_input(1).unwrap().ty, SqlType::Text);
+        assert_eq!(resolve.get_input(2).unwrap().ty, SqlType::Float);
 
         assert_eq!(resolve.outputs.len(), 2);
         assert_eq!(

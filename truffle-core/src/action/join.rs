@@ -9,7 +9,7 @@ use sqlparser::ast::{Join, JoinConstraint, JoinOperator, TableFactor};
 use crate::{
     Error, Simulator,
     column::Column,
-    expr::{ColumnInferrer, InferType},
+    expr::{ColumnInferrer, InferContext},
     object_name_to_strings,
     resolve::ResolvedQuery,
     table::Table,
@@ -126,17 +126,17 @@ impl Simulator {
                     ),
                 };
 
-                let ty = self.infer_expr_type(
+                let col = self.infer_expr_column(
                     expr,
-                    InferType::Required(SqlType::Boolean),
+                    InferContext::with_type(SqlType::Boolean),
                     &inferrer,
                     resolved,
                 )?;
 
-                if ty != SqlType::Boolean {
+                if col.ty != SqlType::Boolean {
                     return Err(Error::TypeMismatch {
                         expected: SqlType::Boolean,
-                        got: ty,
+                        got: col.ty,
                     });
                 }
 
@@ -162,9 +162,7 @@ impl Simulator {
                         .map_err(|_| Error::AmbiguousColumn(column_name.to_string()))?
                     {
                         let table_name = &col_ref.qualifier;
-                        let column = join_ctx
-                            .get_qualified_column(table_name, column_name)?
-                            .unwrap();
+                        let column = join_ctx.get_qualified_column(table_name, column_name)?;
 
                         Some(column.ty.clone())
                     } else {
@@ -523,39 +521,27 @@ impl JoinContext {
         }
     }
 
-    pub fn get_qualified_column(
-        &self,
-        qualifier: &str,
-        column: &str,
-    ) -> Result<Option<Column>, Error> {
+    pub fn get_qualified_column(&self, qualifier: &str, column: &str) -> Result<Column, Error> {
         let matches: Vec<_> = self
             .refs
             .iter()
             .filter(|(col_ref, _)| col_ref.qualifier == qualifier && col_ref.name == column)
             .collect();
 
-        match matches.len() {
-            0 => Ok(None),
-            1 => Ok(matches.first().map(|m| Column::clone(m.1))),
+        let col = match matches.len() {
+            0 => None,
+            1 => matches.first().map(|m| Column::clone(m.1)),
             _ => {
                 // Should be impossible for us to have multiple logical columns for a qualified match.
                 if matches.iter().map(|(_, idx)| idx).all_equal() {
-                    Ok(matches.first().map(|m| Column::clone(m.1)))
+                    matches.first().map(|m| Column::clone(m.1))
                 } else {
                     unreachable!()
                 }
             }
-        }
-    }
+        };
 
-    fn infer_unqualified_type(&self, column: &str) -> Result<Option<SqlType>, Error> {
-        Ok(self.get_column(column)?.map(|col| col.ty.clone()))
-    }
-
-    fn infer_qualified_type(&self, qualifier: &str, column: &str) -> Result<SqlType, Error> {
-        self.get_qualified_column(qualifier, column)?
-            .map(|col| col.ty.clone())
-            .ok_or_else(|| Error::ColumnDoesntExist(column.to_string()))
+        col.ok_or_else(|| Error::ColumnDoesntExist(column.to_string()))
     }
 }
 
@@ -564,34 +550,34 @@ pub struct JoinInferrer<'a> {
 }
 
 impl<'a> ColumnInferrer for JoinInferrer<'a> {
-    fn infer_unqualified_type(
+    fn infer_unqualified_column(
         &self,
         _sim: &Simulator,
         column: &str,
-    ) -> Result<Option<SqlType>, Error> {
-        let mut found_ty: Option<SqlType> = None;
+    ) -> Result<Option<Column>, Error> {
+        let mut found_column: Option<Column> = None;
 
         for join_ctx in self.join_contexts {
-            if let Some(ty) = join_ctx.infer_unqualified_type(column)? {
-                match found_ty {
+            if let Some(col) = join_ctx.get_column(column)? {
+                match found_column {
                     Some(_) => return Err(Error::AmbiguousColumn(column.to_string())),
-                    None => found_ty = Some(ty),
+                    None => found_column = Some(col),
                 }
             }
         }
 
-        Ok(found_ty)
+        Ok(found_column)
     }
 
-    fn infer_qualified_type(
+    fn infer_qualified_column(
         &self,
         _sim: &Simulator,
         qualifier: &str,
         column: &str,
-    ) -> Result<SqlType, Error> {
+    ) -> Result<Column, Error> {
         for join_ctx in self.join_contexts {
-            if let Ok(ty) = join_ctx.infer_qualified_type(qualifier, column) {
-                return Ok(ty);
+            if let Ok(col) = join_ctx.get_qualified_column(qualifier, column) {
+                return Ok(col);
             }
         }
 
@@ -608,44 +594,44 @@ struct JoinContextInferrer<'a> {
 }
 
 impl<'a> ColumnInferrer for JoinContextInferrer<'a> {
-    fn infer_unqualified_type(
+    fn infer_unqualified_column(
         &self,
         _sim: &Simulator,
         column: &str,
-    ) -> Result<Option<SqlType>, Error> {
+    ) -> Result<Option<Column>, Error> {
         // Search Join Table.
-        let mut found_ty = self.join_ctx.infer_unqualified_type(column)?;
+        let mut found_col = self.join_ctx.get_column(column)?;
 
         // Search Right Table.
         if let Some(col) = self.right_table.2.get_column(column) {
-            match found_ty {
+            match found_col {
                 // Ensure that the unqualified column is unique.
                 Some(_) => return Err(Error::AmbiguousColumn(column.to_string())),
-                None => found_ty = Some(col.ty.clone()),
+                None => found_col = Some(col.clone()),
             }
         };
 
-        Ok(found_ty)
+        Ok(found_col)
     }
 
-    fn infer_qualified_type(
+    fn infer_qualified_column(
         &self,
         _sim: &Simulator,
         qualifier: &str,
         column: &str,
-    ) -> Result<SqlType, Error> {
-        if let Ok(ty) = self.join_ctx.infer_qualified_type(qualifier, column) {
-            Ok(ty)
+    ) -> Result<Column, Error> {
+        if let Ok(col) = self.join_ctx.get_qualified_column(qualifier, column) {
+            Ok(col)
         } else {
             if let Some(right_alias) = self.right_table.1
                 && qualifier == right_alias
             {
                 if let Some(col) = self.right_table.2.get_column(column) {
-                    return Ok(col.ty.clone());
+                    return Ok(col.clone());
                 }
             } else if qualifier == self.right_table.0 {
                 if let Some(col) = self.right_table.2.get_column(column) {
-                    return Ok(col.ty.clone());
+                    return Ok(col.clone());
                 }
             }
 

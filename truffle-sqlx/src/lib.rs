@@ -1,4 +1,4 @@
-use proc_macro::{Span, TokenStream};
+use proc_macro2::{Span, TokenStream};
 use quote::quote;
 use std::{
     hash::{DefaultHasher, Hash, Hasher},
@@ -16,15 +16,15 @@ use truffle_loader::{
 };
 
 static SIMULATOR: LazyLock<Result<Simulator, Error>> = LazyLock::new(|| {
-    let config = load_config().map_err(|e| Error::new(Span::call_site().into(), e.to_string()))?;
+    let config = load_config().map_err(|e| Error::new(Span::call_site(), e.to_string()))?;
 
     let mut sim = Simulator::with_dialect(config.dialect);
 
-    let migrations = load_migrations(&config)
-        .map_err(|e| Error::new(Span::call_site().into(), e.to_string()))?;
+    let migrations =
+        load_migrations(&config).map_err(|e| Error::new(Span::call_site(), e.to_string()))?;
 
     apply_migrations(&mut sim, &migrations)
-        .map_err(|e| Error::new(Span::call_site().into(), e.to_string()))?;
+        .map_err(|e| Error::new(Span::call_site(), e.to_string()))?;
 
     Ok(sim)
 });
@@ -102,8 +102,8 @@ impl Parse for QueryAsInput {
     }
 }
 
-fn sql_type_to_rust_type(sql_type: &SqlType) -> syn::Type {
-    match sql_type {
+fn sql_type_to_rust_type(sql_type: &SqlType, nullable: bool) -> syn::Type {
+    let base_type: syn::Type = match sql_type {
         SqlType::SmallInt => parse_quote!(i16),
         SqlType::Integer => parse_quote!(i32),
         SqlType::BigInt => parse_quote!(i64),
@@ -124,12 +124,43 @@ fn sql_type_to_rust_type(sql_type: &SqlType) -> syn::Type {
         #[cfg(feature = "json")]
         SqlType::Json => parse_quote!(serde_json::Value),
         _ => panic!("Unsupported Type: {sql_type:?}"),
+    };
+
+    if nullable {
+        parse_quote!(Option<#base_type>)
+    } else {
+        base_type
+    }
+}
+
+fn sql_type_to_conversion(
+    name: &syn::Ident,
+    sql_type: &SqlType,
+    nullable: bool,
+    expr: &syn::Expr,
+) -> TokenStream {
+    let rust_type = sql_type_to_rust_type(sql_type, nullable);
+    let is_text = sql_type == &SqlType::Text;
+
+    match (is_text, nullable) {
+        (true, true) => {
+            quote! { let #name: #rust_type = (#expr).map(|a| a.to_string()); }
+        }
+        (true, false) => {
+            quote! { let #name: #rust_type = (#expr).to_string(); }
+        }
+        (false, true) => {
+            quote! { let #name: #rust_type = (#expr).map(|a| a.into()); }
+        }
+        (false, false) => {
+            quote! { let #name: #rust_type = (#expr).into(); }
+        }
     }
 }
 
 // Validates the syntax and semantics of your SQL at compile time.
 #[proc_macro]
-pub fn query(input: TokenStream) -> TokenStream {
+pub fn query(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let parsed = syn::parse_macro_input!(input as QueryInput);
     let sql = parsed.sql_lit.value();
 
@@ -167,15 +198,10 @@ pub fn query(input: TokenStream) -> TokenStream {
         .iter()
         .zip(parsed.placeholders.iter())
         .enumerate()
-        .map(|(i, (sql_type, rust_expr))| {
-            let binding = syn::Ident::new(&format!("_arg_{i}"), Span::call_site().into());
-            let rust_type = sql_type_to_rust_type(sql_type);
-
-            let conversion = if sql_type == &SqlType::Text {
-                quote! { let #binding: String = (#rust_expr).to_string(); }
-            } else {
-                quote! { let #binding: #rust_type = (#rust_expr).into(); }
-            };
+        .map(|(i, (column, rust_expr))| {
+            let binding = syn::Ident::new(&format!("_arg_{i}"), Span::call_site());
+            let conversion =
+                sql_type_to_conversion(&binding, &column.ty, column.nullable, rust_expr);
 
             (conversion, binding)
         })
@@ -183,17 +209,18 @@ pub fn query(input: TokenStream) -> TokenStream {
 
     let (conversions, binding_names): (Vec<_>, Vec<_>) = bindings.into_iter().unzip();
 
-    TokenStream::from(quote! {
+    quote! {
         {
             #(#conversions)*
             sqlx::query(#sql)#(.bind(#binding_names))*
         }
-    })
+    }
+    .into()
 }
 
 // Validates the syntax and semantics of your SQL at compile time.
 #[proc_macro]
-pub fn query_as(input: TokenStream) -> TokenStream {
+pub fn query_as(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let parsed = syn::parse_macro_input!(input as QueryAsInput);
     let sql = parsed.sql_lit.value();
 
@@ -230,15 +257,10 @@ pub fn query_as(input: TokenStream) -> TokenStream {
         .iter()
         .zip(parsed.placeholders.iter())
         .enumerate()
-        .map(|(i, (sql_type, rust_expr))| {
-            let binding = syn::Ident::new(&format!("_arg_{i}"), Span::call_site().into());
-            let rust_type = sql_type_to_rust_type(sql_type);
-
-            let conversion = if sql_type == &SqlType::Text {
-                quote! { let #binding: String = (#rust_expr).to_string(); }
-            } else {
-                quote! { let #binding: #rust_type = (#rust_expr).into(); }
-            };
+        .map(|(i, (column, rust_expr))| {
+            let binding = syn::Ident::new(&format!("_arg_{i}"), Span::call_site());
+            let conversion =
+                sql_type_to_conversion(&binding, &column.ty, column.nullable, rust_expr);
 
             (conversion, binding)
         })
@@ -252,8 +274,8 @@ pub fn query_as(input: TokenStream) -> TokenStream {
             .iter()
             .map(|(name, col)| {
                 let field_name = &name.name;
-                let field_ident = syn::Ident::new(field_name, Span::call_site().into());
-                let rust_type = sql_type_to_rust_type(&col.ty);
+                let field_ident = syn::Ident::new(field_name, Span::call_site());
+                let rust_type = sql_type_to_rust_type(&col.ty, col.nullable);
 
                 quote! {
                     #field_ident: row.try_get_unchecked::<#rust_type, _>(#field_name)?.into(),
@@ -270,30 +292,23 @@ pub fn query_as(input: TokenStream) -> TokenStream {
         };
 
         // Run your SQL.
-        TokenStream::from(quote! {
+        quote! {
             {
                 #(#conversions)*
-                sqlx::query(#sql)#(.bind(#binding_names))*
-                      .try_map(|row: #row_type| {
-                          use sqlx::Row as _;
-                          Ok(#ty { #(#fields)* })
+                sqlx::query(#sql)#(.bind(#binding_names))*.try_map(|row: #row_type| {
+                    use sqlx::Row as _;
+                    Ok(#ty { #(#fields)* })
                 })
             }
-        })
+        }
+        .into()
     } else {
         let result_fields: Vec<_> = resolve
             .outputs
             .iter()
             .map(|(name, col)| {
-                let base_type = sql_type_to_rust_type(&col.ty);
-
-                let true_type = if col.nullable {
-                    quote! { Option<#base_type> }
-                } else {
-                    quote! { #base_type }
-                };
-
-                let field_name = syn::Ident::new(&name.name, Span::call_site().into());
+                let true_type = sql_type_to_rust_type(&col.ty, col.nullable);
+                let field_name = syn::Ident::new(&name.name, Span::call_site());
 
                 quote! {
                     pub #field_name: #true_type,
@@ -306,10 +321,10 @@ pub fn query_as(input: TokenStream) -> TokenStream {
         let hashed = hasher.finish();
 
         let result_struct_name =
-            syn::Ident::new(&format!("QueryResult_{hashed}"), Span::call_site().into());
+            syn::Ident::new(&format!("QueryResult_{hashed}"), Span::call_site());
 
         // Run your SQL.
-        TokenStream::from(quote! {
+        quote! {
             {
                 #[derive(Debug, Clone, sqlx::FromRow)]
                 pub struct #result_struct_name {
@@ -319,7 +334,8 @@ pub fn query_as(input: TokenStream) -> TokenStream {
                 #(#conversions)*
                 sqlx::query_as::<_, #result_struct_name>(#sql)#(.bind(#binding_names))*
             }
-        })
+        }
+        .into()
     }
 }
 

@@ -4,7 +4,7 @@ use sqlx::sqlite::SqlitePool;
 pub struct Account {
     pub id: i32,
     pub name: String,
-    pub email: String,
+    pub email: Option<String>,
     pub password: String,
     pub status: AccountStatus,
 }
@@ -49,7 +49,7 @@ async fn main() {
         "#,
         0,
         "John Doe",
-        "johndoe@example.com",
+        Some("johndoe@example.com"),
         "password1",
         AccountStatus::Active,
     )
@@ -69,6 +69,13 @@ async fn main() {
             .map(|p| (p.name, p.status.into()))
             .unwrap();
 
+    let email: String = truffle_sqlx::query_as!("select email from account where id = ?", 0)
+        .fetch_one(&db)
+        .await
+        .map(|p| p.email.unwrap())
+        .unwrap();
+
     println!("Fetched Item: {account:?}");
     println!("Item Pair: {name_status:?}");
+    println!("Email: {email:?}");
 }

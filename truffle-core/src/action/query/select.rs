@@ -7,7 +7,7 @@ use crate::{
     Error, Simulator,
     action::join::{JoinContext, JoinInferrer},
     column::Column,
-    expr::InferType,
+    expr::InferContext,
     object_name_to_strings,
     resolve::{ResolveOutputKey, ResolvedQuery},
     ty::SqlType,
@@ -124,9 +124,8 @@ impl Simulator {
                             return Err(Error::AmbiguousColumn(column_name.to_string()));
                         } else {
                             // The existence of this column should've already been confirmed earlier.
-                            let column = context
-                                .get_qualified_column(&col_ref.qualifier, &col_ref.name)?
-                                .unwrap();
+                            let column =
+                                context.get_qualified_column(&col_ref.qualifier, &col_ref.name)?;
 
                             resolved.insert_output(
                                 ResolveOutputKey::new(
@@ -178,8 +177,7 @@ impl Simulator {
                                     .unique_by(|r| Rc::as_ptr(r.1))
                                 {
                                     let true_column = context
-                                        .get_qualified_column(&col_ref.qualifier, &col_ref.name)?
-                                        .unwrap();
+                                        .get_qualified_column(&col_ref.qualifier, &col_ref.name)?;
 
                                     resolved.insert_output(
                                         ResolveOutputKey::new(
@@ -204,9 +202,9 @@ impl Simulator {
 
         // Validate WHERE clause.
         if let Some(selection) = &sel.selection {
-            self.infer_expr_type(
+            self.infer_expr_column(
                 selection,
-                InferType::Required(SqlType::Boolean),
+                InferContext::with_type(SqlType::Boolean),
                 &inferrer,
                 &mut resolved,
             )?;
@@ -223,7 +221,7 @@ fn find_qualified_column(
 ) -> Result<Column, Error> {
     let matches: Vec<_> = contexts
         .iter()
-        .filter_map(|c| c.get_qualified_column(table, column).ok().flatten())
+        .filter_map(|c| c.get_qualified_column(table, column).ok())
         .collect();
 
     match matches.len() {
@@ -1598,7 +1596,7 @@ mod tests {
         let resolve = sim.execute("select * from person where id = $1").unwrap();
 
         assert_eq!(resolve.inputs.len(), 1);
-        assert_eq!(resolve.get_input(0).unwrap(), &SqlType::Integer);
+        assert_eq!(resolve.get_input(0).unwrap().ty, SqlType::Integer);
 
         assert_eq!(resolve.outputs.len(), 3);
         resolve
@@ -1621,7 +1619,7 @@ mod tests {
         let resolve = sim.execute("select * from person where id = $1").unwrap();
 
         assert_eq!(resolve.inputs.len(), 1);
-        assert_eq!(resolve.get_input(0).unwrap(), &SqlType::Integer);
+        assert_eq!(resolve.get_input(0).unwrap().ty, SqlType::Integer);
 
         assert_eq!(resolve.outputs.len(), 3);
         resolve
@@ -1744,6 +1742,54 @@ mod tests {
         assert_eq!(
             resolve.get_output("item", "created_at").map(|r| &r.ty),
             Some(&SqlType::Integer)
+        );
+    }
+
+    #[test]
+    fn select_with_nullable_input() {
+        let mut sim = Simulator::default();
+        sim.execute("create table person (id int primary key, name text)")
+            .unwrap();
+
+        let resolve = sim.execute("select * from person where name = ?").unwrap();
+
+        assert_eq!(resolve.inputs.len(), 1);
+        assert!(resolve.inputs.first().unwrap().nullable);
+    }
+
+    #[test]
+    fn select_with_nonnullable_input() {
+        let mut sim = Simulator::default();
+        sim.execute("create table person (id int primary key, name text not null)")
+            .unwrap();
+
+        let resolve = sim.execute("select * from person where name = ?").unwrap();
+
+        assert_eq!(resolve.inputs.len(), 1);
+        assert!(!resolve.inputs.first().unwrap().nullable);
+    }
+
+    #[test]
+    fn select_where_between() {
+        let mut sim = Simulator::default();
+        sim.execute("create table person (id int primary key, name text not null)")
+            .unwrap();
+        sim.execute("select * from person where id between 0 and 999")
+            .unwrap();
+    }
+
+    #[test]
+    fn select_where_between_type_mismatch() {
+        let mut sim = Simulator::default();
+        sim.execute("create table person (id int primary key, name text not null)")
+            .unwrap();
+
+        assert_eq!(
+            sim.execute("select * from person where id between 'a' and 'f'"),
+            Err(Error::TypeMismatch {
+                expected: SqlType::Integer,
+                got: SqlType::Text
+            })
         );
     }
 }
