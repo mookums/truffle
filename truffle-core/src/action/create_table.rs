@@ -371,12 +371,9 @@ mod tests {
             .unwrap();
         assert_eq!(sim.tables.len(), 1);
         let table = sim.tables.get("person").unwrap();
-        assert_eq!(table.columns.get("id").unwrap().get_ty(), &SqlType::Uuid);
-        assert_eq!(table.columns.get("name").unwrap().get_ty(), &SqlType::Text);
-        assert_eq!(
-            table.columns.get("weight").unwrap().get_ty(),
-            &SqlType::Float
-        );
+        assert_eq!(table.columns.get("id").unwrap().ty, SqlType::Uuid);
+        assert_eq!(table.columns.get("name").unwrap().ty, SqlType::Text);
+        assert_eq!(table.columns.get("weight").unwrap().ty, SqlType::Float);
     }
 
     #[test]

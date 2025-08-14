@@ -168,7 +168,6 @@ impl Simulator {
                             ));
                         }
                     },
-
                     SelectItem::Wildcard(_) => {
                         for column in table.columns.iter() {
                             resolved.insert_output(

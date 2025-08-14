@@ -75,7 +75,7 @@ impl Simulator {
             | Expr::IsNotTrue(expr)
             | Expr::IsFalse(expr)
             | Expr::IsNotFalse(expr) => {
-                let col = self.infer_expr_column(
+                self.infer_expr_column(
                     expr,
                     InferContext::with_type(SqlType::Boolean),
                     inferrer,
