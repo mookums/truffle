@@ -27,6 +27,12 @@ impl IntoSql<String, SqliteDialect> for &str {
     }
 }
 
+impl IntoSql<String, SqliteDialect> for &String {
+    fn into_sql_type(self) -> String {
+        self.to_string()
+    }
+}
+
 #[cfg(feature = "uuid")]
 impl IntoSql<String, SqliteDialect> for uuid::Uuid {
     fn into_sql_type(self) -> String {

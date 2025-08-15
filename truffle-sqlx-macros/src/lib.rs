@@ -102,7 +102,7 @@ impl Parse for QueryAsInput {
     }
 }
 
-fn sql_type_to_rust_type(sql_type: &SqlType) -> syn::Type {
+fn sql_type_to_rust_type(sql_type: &SqlType, dialect: &DialectKind) -> syn::Type {
     match sql_type {
         SqlType::SmallInt => parse_quote!(i16),
         SqlType::Integer => parse_quote!(i32),
@@ -110,7 +110,10 @@ fn sql_type_to_rust_type(sql_type: &SqlType) -> syn::Type {
         SqlType::Float => parse_quote!(f32),
         SqlType::Double => parse_quote!(f64),
         SqlType::Text => parse_quote!(String),
-        SqlType::Boolean => parse_quote!(bool),
+        SqlType::Boolean => match dialect {
+            DialectKind::Generic | DialectKind::Ansi | DialectKind::Postgres => parse_quote!(bool),
+            DialectKind::Sqlite => parse_quote!(i32),
+        },
         #[cfg(feature = "time")]
         SqlType::Date => parse_quote!(time::Date),
         #[cfg(feature = "time")]
@@ -134,7 +137,7 @@ fn sql_type_into(
     expr: &syn::Expr,
     dialect: &DialectKind,
 ) -> TokenStream {
-    let storage_type = sql_type_to_rust_type(sql_type);
+    let storage_type = sql_type_to_rust_type(sql_type, dialect);
     let dialect_type: syn::Type = match dialect {
         DialectKind::Sqlite => parse_quote!(truffle_sqlx::dialect::SqliteDialect),
         DialectKind::Postgres => parse_quote!(truffle_sqlx::dialect::PostgreSqlDialect),
@@ -158,7 +161,7 @@ fn sql_type_from(
     nullable: bool,
     dialect: &DialectKind,
 ) -> TokenStream {
-    let storage_type = sql_type_to_rust_type(sql_type);
+    let storage_type = sql_type_to_rust_type(sql_type, dialect);
     let dialect_type: syn::Type = match dialect {
         DialectKind::Sqlite => parse_quote!(truffle_sqlx::dialect::SqliteDialect),
         DialectKind::Postgres => parse_quote!(truffle_sqlx::dialect::PostgreSqlDialect),
@@ -343,7 +346,7 @@ pub fn query_as(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
             .outputs
             .iter()
             .map(|(name, col)| {
-                let true_type = sql_type_to_rust_type(&col.ty);
+                let true_type = sql_type_to_rust_type(&col.ty, &sim.dialect.kind());
                 let field_name = syn::Ident::new(&name.name, Span::call_site());
 
                 if col.nullable {
