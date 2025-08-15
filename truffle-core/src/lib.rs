@@ -140,6 +140,14 @@ impl Simulator {
                 Statement::CreateTable(create_table) => self.create_table(create_table)?,
                 // TODO: Support Alter Table
                 Statement::Query(query) => self.query(query)?,
+                Statement::Update {
+                    table,
+                    assignments,
+                    from,
+                    selection,
+                    returning,
+                    or,
+                } => self.update(table, assignments, from, selection, returning, or)?,
                 Statement::Insert(insert) => self.insert(insert)?,
                 Statement::Delete(delete) => self.delete(delete)?,
                 Statement::Drop {

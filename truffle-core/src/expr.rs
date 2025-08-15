@@ -201,6 +201,9 @@ impl Simulator {
                     Column::new(ty, false, false)
                 }
             },
+            Expr::Function(func) => {
+                todo!()
+            }
             Expr::Subquery(_) => {
                 todo!()
             }

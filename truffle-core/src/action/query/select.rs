@@ -288,7 +288,6 @@ mod tests {
             .unwrap();
 
         sim.execute("select * from person;").unwrap();
-        sim.execute("select * from person;").unwrap();
     }
 
     #[test]
