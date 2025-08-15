@@ -2,6 +2,7 @@ mod action;
 mod column;
 pub mod dialect;
 mod expr;
+mod func;
 mod misc;
 pub mod resolve;
 mod table;

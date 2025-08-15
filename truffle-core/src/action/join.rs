@@ -241,14 +241,14 @@ impl Simulator {
 }
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
-pub struct ColumnRef {
+pub struct QualifiedColumnName {
     pub qualifier: String,
     pub name: String,
 }
 
-impl ColumnRef {
-    pub fn new(qualifier: impl ToString, name: impl ToString) -> ColumnRef {
-        ColumnRef {
+impl QualifiedColumnName {
+    pub fn new(qualifier: impl ToString, name: impl ToString) -> QualifiedColumnName {
+        QualifiedColumnName {
             qualifier: qualifier.to_string(),
             name: name.to_string(),
         }
@@ -257,7 +257,7 @@ impl ColumnRef {
 
 #[derive(Debug)]
 pub struct JoinContext {
-    pub refs: HashMap<ColumnRef, Rc<Column>>,
+    pub refs: HashMap<QualifiedColumnName, Rc<Column>>,
 }
 
 enum JoinKind {
@@ -280,14 +280,20 @@ impl JoinContext {
         for (column_name, column) in table_columns.iter() {
             let col_rc = Rc::new(column.clone());
             assert!(
-                refs.insert(ColumnRef::new(&table_name, column_name), col_rc.clone())
-                    .is_none()
+                refs.insert(
+                    QualifiedColumnName::new(&table_name, column_name),
+                    col_rc.clone()
+                )
+                .is_none()
             );
 
             if let Some(alias) = &alias {
                 assert!(
-                    refs.insert(ColumnRef::new(alias.to_string(), column_name), col_rc)
-                        .is_none()
+                    refs.insert(
+                        QualifiedColumnName::new(alias.to_string(), column_name),
+                        col_rc
+                    )
+                    .is_none()
                 )
             }
         }
@@ -323,7 +329,10 @@ impl JoinContext {
 
                     let col_rc = existing_column_rc.unwrap_or_else(|| Rc::new(column.clone()));
 
-                    match self.refs.entry(ColumnRef::new(&table_name, column_name)) {
+                    match self
+                        .refs
+                        .entry(QualifiedColumnName::new(&table_name, column_name))
+                    {
                         hash_map::Entry::Occupied(occupied_entry) => {
                             assert!(
                                 Rc::ptr_eq(occupied_entry.get(), &col_rc),
@@ -337,7 +346,10 @@ impl JoinContext {
 
                     if let Some(alias) = &alias {
                         self.refs
-                            .insert(ColumnRef::new(alias.to_string(), column_name), col_rc)
+                            .insert(
+                                QualifiedColumnName::new(alias.to_string(), column_name),
+                                col_rc,
+                            )
                             .map_or(Ok(()), |_| Err(Error::AmbiguousAlias(alias.to_string())))?;
                     }
                 }
@@ -360,7 +372,10 @@ impl JoinContext {
                             })
                             .unwrap();
 
-                        match self.refs.entry(ColumnRef::new(&table_name, column_name)) {
+                        match self
+                            .refs
+                            .entry(QualifiedColumnName::new(&table_name, column_name))
+                        {
                             hash_map::Entry::Occupied(occupied_entry) => {
                                 assert!(
                                     Rc::ptr_eq(occupied_entry.get(), &existing_col_rc),
@@ -375,7 +390,7 @@ impl JoinContext {
                         if let Some(alias) = &alias {
                             self.refs
                                 .insert(
-                                    ColumnRef::new(alias.to_string(), column_name),
+                                    QualifiedColumnName::new(alias.to_string(), column_name),
                                     existing_col_rc,
                                 )
                                 .map_or(Ok(()), |_| {
@@ -385,7 +400,10 @@ impl JoinContext {
                     } else {
                         let col_rc = Rc::new(column.clone());
 
-                        match self.refs.entry(ColumnRef::new(&table_name, column_name)) {
+                        match self
+                            .refs
+                            .entry(QualifiedColumnName::new(&table_name, column_name))
+                        {
                             hash_map::Entry::Occupied(occupied_entry) => {
                                 assert!(
                                     Rc::ptr_eq(occupied_entry.get(), &col_rc),
@@ -399,7 +417,10 @@ impl JoinContext {
 
                         if let Some(alias) = &alias {
                             self.refs
-                                .insert(ColumnRef::new(alias.to_string(), column_name), col_rc)
+                                .insert(
+                                    QualifiedColumnName::new(alias.to_string(), column_name),
+                                    col_rc,
+                                )
                                 .map_or(Ok(()), |_| {
                                     Err(Error::AmbiguousAlias(alias.to_string()))
                                 })?;
@@ -423,7 +444,10 @@ impl JoinContext {
                             .exactly_one()
                             .unwrap();
 
-                        match self.refs.entry(ColumnRef::new(&table_name, column_name)) {
+                        match self
+                            .refs
+                            .entry(QualifiedColumnName::new(&table_name, column_name))
+                        {
                             hash_map::Entry::Occupied(occupied_entry) => {
                                 assert!(
                                     Rc::ptr_eq(occupied_entry.get(), &existing_col_rc),
@@ -438,7 +462,7 @@ impl JoinContext {
                         if let Some(alias) = &alias {
                             self.refs
                                 .insert(
-                                    ColumnRef::new(alias.to_string(), column_name),
+                                    QualifiedColumnName::new(alias.to_string(), column_name),
                                     existing_col_rc,
                                 )
                                 .map_or(Ok(()), |_| {
@@ -448,7 +472,10 @@ impl JoinContext {
                     } else {
                         let col_rc = Rc::new(column.clone());
 
-                        match self.refs.entry(ColumnRef::new(&table_name, column_name)) {
+                        match self
+                            .refs
+                            .entry(QualifiedColumnName::new(&table_name, column_name))
+                        {
                             hash_map::Entry::Occupied(occupied_entry) => {
                                 assert!(
                                     Rc::ptr_eq(occupied_entry.get(), &col_rc),
@@ -462,7 +489,10 @@ impl JoinContext {
 
                         if let Some(alias) = &alias {
                             self.refs
-                                .insert(ColumnRef::new(alias.to_string(), column_name), col_rc)
+                                .insert(
+                                    QualifiedColumnName::new(alias.to_string(), column_name),
+                                    col_rc,
+                                )
                                 .map_or(Ok(()), |_| {
                                     Err(Error::AmbiguousAlias(alias.to_string()))
                                 })?;
@@ -482,7 +512,7 @@ impl JoinContext {
     pub fn get_column(&self, column: &str) -> Result<Option<Column>, Error> {
         fn match_into_column(
             join_ctx: &JoinContext,
-            matches: &[(ColumnRef, Rc<Column>)],
+            matches: &[(QualifiedColumnName, Rc<Column>)],
         ) -> Column {
             matches
                 .first()
@@ -498,7 +528,7 @@ impl JoinContext {
                 .unwrap()
         }
 
-        let matches: Vec<(ColumnRef, Rc<Column>)> = self
+        let matches: Vec<(QualifiedColumnName, Rc<Column>)> = self
             .refs
             .clone()
             .into_iter()
