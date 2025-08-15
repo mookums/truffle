@@ -1,10 +1,13 @@
 [package]
-name = "truffle-sqlx"
+name = "truffle-sqlx-macros"
 version = "0.1.0"
 edition = "2024"
 
+[lib]
+proc-macro = true
+
 [features]
-default = [ "all" ]
+default = []
 
 # Enable all features
 all = ["time", "json", "uuid", "serde"]
@@ -27,4 +30,7 @@ serde_json = { workspace = true, optional = true }
 time = { workspace = true, optional = true }
 
 truffle = { path = "../truffle-core" }
-truffle-sqlx-macros = { path = "../truffle-sqlx-macros" }
+truffle-loader = { path = "../truffle-loader" }
+quote = "1.0.40"
+syn = { version = "2.0.104", features = ["extra-traits"] }
+proc-macro2 = "1.0.97"

@@ -1,13 +1,6 @@
 use serde::Deserialize;
 
-#[derive(Debug, Copy, Clone, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum DialectKind {
-    Generic,
-    Ansi,
-    Sqlite,
-    Postgres,
-}
+use crate::dialect::DialectKind;
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default)]

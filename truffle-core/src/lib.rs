@@ -1,17 +1,17 @@
 mod action;
 mod column;
+pub mod dialect;
 mod expr;
 mod misc;
 pub mod resolve;
 mod table;
 pub mod ty;
 
+pub use dialect::*;
 pub use misc::config::Config;
-pub use misc::config::DialectKind;
 use misc::immutable::Immutable;
 
 use resolve::ResolvedQuery;
-pub use sqlparser::dialect::*;
 use sqlparser::{
     ast::{ObjectName, Statement},
     parser::Parser,
@@ -73,8 +73,7 @@ pub enum Error {
 
 #[derive(Debug, Clone)]
 pub struct Simulator {
-    pub kind: DialectKind,
-    dialect: Immutable<Arc<dyn Dialect>>,
+    pub dialect: Immutable<Arc<dyn Dialect>>,
     tables: HashMap<String, Table>,
 }
 
@@ -88,8 +87,7 @@ fn object_name_to_strings(name: &ObjectName) -> Vec<String> {
 impl Default for Simulator {
     fn default() -> Self {
         Self {
-            kind: DialectKind::Generic,
-            dialect: Immutable::new(Arc::new(GenericDialect {})),
+            dialect: Immutable::new(Arc::new(SqliteDialect::default())),
             tables: HashMap::new(),
         }
     }
@@ -97,9 +95,8 @@ impl Default for Simulator {
 
 impl Simulator {
     /// Construct a new Simulator with the given SQL Dialect.
-    fn create<D: Dialect>(dialect: D, kind: DialectKind) -> Self {
+    fn create<D: Dialect>(dialect: D) -> Self {
         Self {
-            kind,
             dialect: Immutable::new(Arc::new(dialect)),
             tables: HashMap::new(),
         }
@@ -108,10 +105,11 @@ impl Simulator {
     // Construct a new Simulator with the given Dialect.
     pub fn with_dialect(kind: DialectKind) -> Self {
         match kind {
-            DialectKind::Generic => Simulator::create(GenericDialect {}, DialectKind::Generic),
-            DialectKind::Ansi => Simulator::create(AnsiDialect {}, DialectKind::Ansi),
-            DialectKind::Sqlite => Simulator::create(SQLiteDialect {}, DialectKind::Sqlite),
-            DialectKind::Postgres => Simulator::create(PostgreSqlDialect {}, DialectKind::Postgres),
+            DialectKind::Generic => Simulator::create(GenericDialect::default()),
+            // DialectKind::Ansi => Simulator::create(AnsiDialect {}),
+            DialectKind::Sqlite => Simulator::create(SqliteDialect::default()),
+            DialectKind::Postgres => Simulator::create(PostgreSqlDialect::default()),
+            _ => todo!(),
         }
     }
 
@@ -131,7 +129,8 @@ impl Simulator {
     /// Executes the given SQL in the Simulator and updates the state.
     /// Returns the resolved query for the last statement ran.
     pub fn execute(&mut self, sql: impl AsRef<str>) -> Result<ResolvedQuery, Error> {
-        let parser = Parser::new(&**self.dialect);
+        let dialect = &**self.dialect.parser_dialect();
+        let parser = Parser::new(dialect);
         let statements = parser.try_with_sql(sql.as_ref())?.parse_statements()?;
 
         let mut resolved = ResolvedQuery::default();

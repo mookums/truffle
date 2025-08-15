@@ -5,6 +5,7 @@ members = [
     "truffle-core",
     "truffle-loader",
     "truffle-sqlx",
+    "truffle-sqlx-macros",
     "truffle-sqlx-demo",
 ]
 
