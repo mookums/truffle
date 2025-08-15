@@ -1,13 +1,25 @@
-use std::str::FromStr;
-
 use crate::impl_transparent_compat;
 
-use time::format_description::well_known::Rfc3339;
 use truffle::dialect::SqliteDialect;
+
+#[cfg(feature = "time")]
+use time::format_description::well_known::Rfc3339;
 
 use super::{FromSql, IntoSql};
 
-impl_transparent_compat!(SqliteDialect, i16, i32, i64, f32, f64, bool, String);
+impl_transparent_compat!(SqliteDialect, i16, i32, i64, f32, f64, String);
+
+impl IntoSql<i32, SqliteDialect> for bool {
+    fn into_sql_type(self) -> i32 {
+        if self { 1 } else { 0 }
+    }
+}
+
+impl FromSql<i32, SqliteDialect> for bool {
+    fn from_sql_type(value: i32) -> Self {
+        value == 1
+    }
+}
 
 impl IntoSql<String, SqliteDialect> for &str {
     fn into_sql_type(self) -> String {
@@ -96,6 +108,7 @@ impl IntoSql<String, SqliteDialect> for serde_json::Value {
 #[cfg(feature = "json")]
 impl FromSql<String, SqliteDialect> for serde_json::Value {
     fn from_sql_type(value: String) -> Self {
+        use std::str::FromStr;
         Self::from_str(&value).unwrap()
     }
 }
