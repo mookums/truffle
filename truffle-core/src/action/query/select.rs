@@ -1,13 +1,14 @@
 use std::{collections::HashSet, rc::Rc};
 
 use itertools::Itertools;
-use sqlparser::ast::{Expr, Select, SelectItem, SelectItemQualifiedWildcardKind, TableFactor};
+use sqlparser::ast::{
+    Expr, Function, Select, SelectItem, SelectItemQualifiedWildcardKind, TableFactor,
+};
 
 use crate::{
     Error, Simulator,
     action::join::{JoinContext, JoinInferrer},
-    column::Column,
-    expr::InferContext,
+    expr::{ColumnInferrer, InferContext},
     object_name_to_strings,
     resolve::{ResolveOutputKey, ResolvedQuery},
     ty::SqlType,
@@ -81,6 +82,11 @@ impl Simulator {
                             column: column_name.to_string(),
                         });
                     }
+                    Expr::Function(function) => {
+                        columns
+                            .expect_list_mut()
+                            .push(SelectColumn::Function(Box::new(function.clone())));
+                    }
                     _ => {
                         return Err(Error::Unsupported(format!(
                             "Unsupported Select Expr: {expr:?}"
@@ -144,12 +150,9 @@ impl Simulator {
                 for column in list.into_iter() {
                     match column {
                         SelectColumn::Unqualified(column) => {
-                            let true_column = contexts
-                                .iter()
-                                .filter_map(|c| c.get_column(&column).transpose())
-                                .at_most_one()
-                                .map_err(|_| Error::AmbiguousColumn(column.clone()))?
-                                .ok_or_else(|| Error::ColumnDoesntExist(column.clone()))??;
+                            let true_column = inferrer
+                                .infer_unqualified_column(self, &column)?
+                                .ok_or_else(|| Error::ColumnDoesntExist(column.clone()))?;
 
                             resolved.insert_output(
                                 ResolveOutputKey::new(None, column),
@@ -158,7 +161,7 @@ impl Simulator {
                         }
                         SelectColumn::Qualified { qualifier, column } => {
                             let true_column =
-                                find_qualified_column(&contexts, &qualifier, &column)?;
+                                inferrer.infer_qualified_column(self, &qualifier, &column)?;
 
                             resolved.insert_output(
                                 ResolveOutputKey::new(Some(qualifier), column),
@@ -195,6 +198,22 @@ impl Simulator {
                                 return Err(Error::QualifierDoesntExist(qualifier.to_string()));
                             }
                         }
+                        SelectColumn::Function(function) => {
+                            let col = self.infer_function_column(
+                                &function,
+                                InferContext::unknown(),
+                                &inferrer,
+                                &mut resolved,
+                            )?;
+
+                            resolved.insert_output(
+                                ResolveOutputKey {
+                                    qualifier: None,
+                                    name: function.name.to_string().to_lowercase(),
+                                },
+                                col,
+                            );
+                        }
                     }
                 }
             }
@@ -211,29 +230,6 @@ impl Simulator {
         }
 
         Ok(resolved)
-    }
-}
-
-fn find_qualified_column(
-    contexts: &[JoinContext],
-    table: &str,
-    column: &str,
-) -> Result<Column, Error> {
-    let matches: Vec<_> = contexts
-        .iter()
-        .filter_map(|c| c.get_qualified_column(table, column).ok())
-        .collect();
-
-    match matches.len() {
-        0 => Err(Error::ColumnDoesntExist(column.to_string())),
-        1 => Ok(matches.into_iter().next().unwrap()),
-        _ => {
-            if matches.iter().all_equal() {
-                Ok(matches.into_iter().next().unwrap())
-            } else {
-                Err(Error::AmbiguousColumn(column.to_string()))
-            }
-        }
     }
 }
 
@@ -264,6 +260,7 @@ pub enum SelectColumn {
         column: String,
     },
     Wildcard(String),
+    Function(Box<Function>),
 }
 
 fn check_qualifier(ctx: &[JoinContext], name: &str) -> Result<(), Error> {
@@ -1789,6 +1786,44 @@ mod tests {
                 expected: SqlType::Integer,
                 got: SqlType::Text
             })
+        );
+    }
+
+    #[test]
+    fn select_with_count_function() {
+        let mut sim = Simulator::default();
+        sim.execute("create table item (id int primary key, name text not null default 'abc', age int default 0)").unwrap();
+
+        let resolve = sim
+            .execute("select COUNT(id) from item where id = $1")
+            .unwrap();
+
+        assert_eq!(resolve.inputs.len(), 1);
+        assert_eq!(resolve.get_input(0).unwrap().ty, SqlType::Integer);
+
+        assert_eq!(resolve.outputs.len(), 1);
+        assert_eq!(
+            resolve.outputs.iter().next().unwrap().1.ty,
+            SqlType::Integer
+        );
+    }
+
+    #[test]
+    fn select_with_count_function_aliased() {
+        let mut sim = Simulator::default();
+        sim.execute("create table item (id int primary key, name text not null default 'abc', age int default 0)").unwrap();
+
+        let resolve = sim
+            .execute("select COUNT(id) as item_count from item where id = $1")
+            .unwrap();
+
+        assert_eq!(resolve.inputs.len(), 1);
+        assert_eq!(resolve.get_input(0).unwrap().ty, SqlType::Integer);
+
+        assert_eq!(resolve.outputs.len(), 1);
+        assert_eq!(
+            resolve.get_output_with_name("item_count").unwrap().ty,
+            SqlType::Integer
         );
     }
 }

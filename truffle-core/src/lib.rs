@@ -68,6 +68,8 @@ pub enum Error {
     NoCommonColumn,
     #[error("Missing placeholder '${0}'")]
     MissingPlaceholder(usize),
+    #[error("Function '${0}' doesn't exist")]
+    FunctionDoesntExist(String),
     #[error("'{0}' is currently unsupported")]
     Unsupported(String),
 }

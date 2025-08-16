@@ -1,4 +1,4 @@
-use sqlparser::ast::{BinaryOperator, CastKind, Expr, FunctionArguments, UnaryOperator, Value};
+use sqlparser::ast::{BinaryOperator, CastKind, Expr, UnaryOperator, Value};
 
 #[cfg(feature = "time")]
 use time::{
@@ -88,7 +88,7 @@ impl Simulator {
             | Expr::IsNotUnknown(expr)
             | Expr::IsNull(expr)
             | Expr::IsNotNull(expr) => {
-                self.infer_expr_column(expr, InferContext::unknown(), inferrer, resolved)?;
+                self.infer_expr_column(&expr, InferContext::unknown(), inferrer, resolved)?;
 
                 Column::new(SqlType::Boolean, false, false)
             }
@@ -108,16 +108,16 @@ impl Simulator {
                 inferrer.infer_qualified_column(self, qualifier, column_name)?
             }
             Expr::BinaryOp { left, right, op } => {
-                self.infer_binary_op_column([left, right], op, context, inferrer, resolved)?
+                self.infer_binary_op_column([&left, &right], op, context, inferrer, resolved)?
             }
             Expr::UnaryOp { expr, op } => {
-                self.infer_unary_op_column(expr, op, context, inferrer, resolved)?
+                self.infer_unary_op_column(&expr, op, context, inferrer, resolved)?
             }
-            Expr::Nested(expr) => self.infer_expr_column(expr, context, inferrer, resolved)?,
+            Expr::Nested(expr) => self.infer_expr_column(&expr, context, inferrer, resolved)?,
             Expr::InList { expr, list, .. } => {
                 let mut nullable = false;
                 let col =
-                    self.infer_expr_column(expr, InferContext::unknown(), inferrer, resolved)?;
+                    self.infer_expr_column(&expr, InferContext::unknown(), inferrer, resolved)?;
 
                 for item in list {
                     let inner_col = self.infer_expr_column(
@@ -143,7 +143,7 @@ impl Simulator {
                     CastKind::Cast | CastKind::DoubleColon => {
                         // TODO: Ensure the two types are castable.
                         let inner_col = self.infer_expr_column(
-                            expr,
+                            &expr,
                             InferContext::unknown(),
                             inferrer,
                             resolved,
@@ -164,7 +164,7 @@ impl Simulator {
                     }
 
                     let inner_tuple_cols: Result<Vec<Column>, Error> = exprs
-                        .iter()
+                        .into_iter()
                         .zip(cols)
                         .map(|(e, col)| {
                             self.infer_expr_column(
@@ -185,7 +185,7 @@ impl Simulator {
                 _ => {
                     let ty = SqlType::Tuple(
                         exprs
-                            .iter()
+                            .into_iter()
                             .map(|e| {
                                 self.infer_expr_column(
                                     e,
@@ -202,7 +202,7 @@ impl Simulator {
                 }
             },
             Expr::Function(func) => {
-                todo!()
+                self.infer_function_column(func, context, inferrer, resolved)?
             }
             Expr::Subquery(_) => {
                 todo!()
@@ -211,7 +211,7 @@ impl Simulator {
                 expr, low, high, ..
             } => {
                 let value =
-                    self.infer_expr_column(expr, InferContext::unknown(), inferrer, resolved)?;
+                    self.infer_expr_column(&expr, InferContext::unknown(), inferrer, resolved)?;
 
                 let low_col = self.infer_expr_column(
                     low,

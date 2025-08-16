@@ -2,7 +2,14 @@ use sqlparser::ast::{
     DuplicateTreatment, Expr, Function, FunctionArg, FunctionArgExpr, FunctionArguments,
 };
 
-use crate::{Error, object_name_to_strings};
+use crate::{
+    Error, Simulator,
+    column::Column,
+    expr::{ColumnInferrer, InferContext},
+    object_name_to_strings,
+    resolve::ResolvedQuery,
+    ty::SqlType,
+};
 
 pub enum ColumnRef {
     Wildcard,
@@ -16,17 +23,43 @@ pub enum SqlFunction {
     Sum { distinct: bool, column: ColumnRef },
 }
 
-impl SqlFunction {
-    pub fn from_ast(func: Function) -> Result<SqlFunction, Error> {
+impl Simulator {
+    pub(super) fn infer_function_column<I: ColumnInferrer>(
+        &self,
+        func: &Function,
+        context: InferContext,
+        inferrer: &I,
+        resolved: &mut ResolvedQuery,
+    ) -> Result<Column, Error> {
         let func_name = func.name.0.first().unwrap().to_string().to_lowercase();
 
-        match func_name.as_str() {
-            "count" => Self::parse_count_function(func.args),
+        let sql_func = match func_name.as_str() {
+            "count" => SqlFunction::parse_count_function(&func.args)?,
+            _ => return Err(Error::FunctionDoesntExist(func_name)),
+        };
+
+        match sql_func {
+            SqlFunction::Count { column, .. } => {
+                match column {
+                    ColumnRef::Wildcard => {}
+                    ColumnRef::QualifiedWildcard(_) => todo!(),
+                    ColumnRef::Column(column_name) => {
+                        inferrer.infer_unqualified_column(self, &column_name)?;
+                    }
+                    ColumnRef::QualifiedColumn(qualifier, name) => {
+                        inferrer.infer_qualified_column(self, &qualifier, &name)?;
+                    }
+                }
+
+                Ok(Column::new(SqlType::Integer, false, false))
+            }
             _ => todo!(),
         }
     }
+}
 
-    fn parse_count_function(args: FunctionArguments) -> Result<SqlFunction, Error> {
+impl SqlFunction {
+    fn parse_count_function(args: &FunctionArguments) -> Result<SqlFunction, Error> {
         match args {
             FunctionArguments::List(list) => {
                 let distinct = if let Some(duplicate_treatment) = list.duplicate_treatment {
