@@ -70,6 +70,8 @@ pub enum Error {
     MissingPlaceholder(usize),
     #[error("Function '${0}' doesn't exist")]
     FunctionDoesntExist(String),
+    #[error("Function argument count mismatch: expected {expected} and got {got}")]
+    FunctionArgumentCount { expected: usize, got: usize },
     #[error("'{0}' is currently unsupported")]
     Unsupported(String),
 }

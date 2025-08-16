@@ -24,7 +24,7 @@ pub enum SqlFunction {
 }
 
 impl Simulator {
-    pub(super) fn infer_function_column<I: ColumnInferrer>(
+    pub(crate) fn infer_function_column<I: ColumnInferrer>(
         &self,
         func: &Function,
         context: InferContext,
@@ -71,33 +71,37 @@ impl SqlFunction {
                     false
                 };
 
-                if list.args.len() == 1 {
-                    let arg = list.args.first().unwrap();
-                    match arg {
-                        FunctionArg::Unnamed(arg_expr) => match arg_expr {
-                            FunctionArgExpr::Expr(expr) => match expr {
-                                Expr::Identifier(ident) => Ok(SqlFunction::Count {
-                                    distinct,
-                                    column: ColumnRef::Column(ident.to_string()),
-                                }),
-                                _ => todo!(),
-                            },
-                            FunctionArgExpr::QualifiedWildcard(object_name) => {
-                                let name = &object_name_to_strings(object_name)[0];
-                                Ok(SqlFunction::Count {
-                                    distinct,
-                                    column: ColumnRef::QualifiedWildcard(name.to_string()),
-                                })
-                            }
-                            FunctionArgExpr::Wildcard => Ok(SqlFunction::Count {
+                // COUNT can only take in one argument.
+                if list.args.len() != 1 {
+                    return Err(Error::FunctionArgumentCount {
+                        expected: 1,
+                        got: list.args.len(),
+                    });
+                }
+
+                let arg = list.args.first().unwrap();
+                match arg {
+                    FunctionArg::Unnamed(arg_expr) => match arg_expr {
+                        FunctionArgExpr::Expr(expr) => match expr {
+                            Expr::Identifier(ident) => Ok(SqlFunction::Count {
                                 distinct,
-                                column: ColumnRef::Wildcard,
+                                column: ColumnRef::Column(ident.to_string()),
                             }),
+                            _ => todo!(),
                         },
-                        _ => todo!(),
-                    }
-                } else {
-                    todo!("Error")
+                        FunctionArgExpr::QualifiedWildcard(object_name) => {
+                            let name = &object_name_to_strings(object_name)[0];
+                            Ok(SqlFunction::Count {
+                                distinct,
+                                column: ColumnRef::QualifiedWildcard(name.to_string()),
+                            })
+                        }
+                        FunctionArgExpr::Wildcard => Ok(SqlFunction::Count {
+                            distinct,
+                            column: ColumnRef::Wildcard,
+                        }),
+                    },
+                    _ => todo!(),
                 }
             }
             _ => todo!(),
