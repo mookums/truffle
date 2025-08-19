@@ -72,6 +72,8 @@ pub enum Error {
     FunctionDoesntExist(String),
     #[error("Function argument count mismatch: expected {expected} and got {got}")]
     FunctionArgumentCount { expected: usize, got: usize },
+    #[error("Function called wrong, '${0}'")]
+    FunctionCall(String),
     #[error("'{0}' is currently unsupported")]
     Unsupported(String),
 }
