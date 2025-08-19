@@ -44,7 +44,9 @@ impl Simulator {
                     ColumnRef::Wildcard => {}
                     ColumnRef::QualifiedWildcard(_) => todo!(),
                     ColumnRef::Column(column_name) => {
-                        inferrer.infer_unqualified_column(self, &column_name)?;
+                        inferrer
+                            .infer_unqualified_column(self, &column_name)?
+                            .ok_or_else(|| Error::ColumnDoesntExist(column_name.clone()))?;
                     }
                     ColumnRef::QualifiedColumn(qualifier, name) => {
                         inferrer.infer_qualified_column(self, &qualifier, &name)?;

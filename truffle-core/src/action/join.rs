@@ -128,7 +128,7 @@ impl Simulator {
 
                 let col = self.infer_expr_column(
                     expr,
-                    InferContext::with_type(SqlType::Boolean),
+                    InferContext::default().with_type(SqlType::Boolean),
                     &inferrer,
                     resolved,
                 )?;

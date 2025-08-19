@@ -11,7 +11,7 @@ use time::{
 
 use crate::{Error, Simulator, column::Column, resolve::ResolvedQuery, ty::SqlType};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct InferContext {
     ty: Option<SqlType>,
     nullable: Option<bool>,
@@ -19,27 +19,19 @@ pub struct InferContext {
 }
 
 impl InferContext {
-    pub fn with_type(ty: SqlType) -> Self {
+    pub fn with_type(self, ty: SqlType) -> Self {
         Self {
             ty: Some(ty),
-            nullable: None,
-            default: None,
+            nullable: self.nullable,
+            default: self.default,
         }
     }
 
-    pub fn with_column(col: Column) -> Self {
+    pub fn with_nullable(self, nullable: bool) -> Self {
         Self {
-            ty: Some(col.ty),
-            nullable: Some(col.nullable),
-            default: Some(col.default),
-        }
-    }
-
-    pub fn unknown() -> Self {
-        Self {
-            ty: None,
-            nullable: None,
-            default: None,
+            ty: self.ty,
+            nullable: Some(nullable),
+            default: self.default,
         }
     }
 }
@@ -77,7 +69,7 @@ impl Simulator {
             | Expr::IsNotFalse(expr) => {
                 self.infer_expr_column(
                     expr,
-                    InferContext::with_type(SqlType::Boolean),
+                    InferContext::default().with_type(SqlType::Boolean),
                     inferrer,
                     resolved,
                 )?;
@@ -88,11 +80,82 @@ impl Simulator {
             | Expr::IsNotUnknown(expr)
             | Expr::IsNull(expr)
             | Expr::IsNotNull(expr) => {
-                self.infer_expr_column(expr, InferContext::unknown(), inferrer, resolved)?;
+                self.infer_expr_column(expr, InferContext::default(), inferrer, resolved)?;
+                Column::new(SqlType::Boolean, false, false)
+            }
+            Expr::IsDistinctFrom(left, right) | Expr::IsNotDistinctFrom(left, right) => {
+                let left_col =
+                    self.infer_expr_column(left, InferContext::default(), inferrer, resolved)?;
+                self.infer_expr_column(
+                    right,
+                    InferContext::default().with_type(left_col.ty),
+                    inferrer,
+                    resolved,
+                )?;
 
                 Column::new(SqlType::Boolean, false, false)
             }
+            Expr::IsNormalized { expr, .. } => {
+                let col = self.infer_expr_column(
+                    expr,
+                    InferContext::default().with_type(SqlType::Text),
+                    inferrer,
+                    resolved,
+                )?;
 
+                Column::new(SqlType::Boolean, col.nullable, false)
+            }
+            Expr::Like { expr, .. } | Expr::ILike { expr, .. } => {
+                let col = self.infer_expr_column(
+                    expr,
+                    InferContext::default().with_type(SqlType::Text),
+                    inferrer,
+                    resolved,
+                )?;
+
+                Column::new(SqlType::Boolean, col.nullable, false)
+            }
+            Expr::Substring {
+                expr,
+                substring_from,
+                substring_for,
+                ..
+            } => {
+                let str_col = self.infer_expr_column(
+                    expr,
+                    InferContext::default().with_type(SqlType::Text),
+                    inferrer,
+                    resolved,
+                )?;
+
+                // Ensure that the from is an integer.
+                if let Some(from_expr) = substring_from {
+                    let from_col = self.infer_expr_column(
+                        from_expr,
+                        InferContext::default(),
+                        inferrer,
+                        resolved,
+                    )?;
+                    if !from_col.ty.is_integer() {
+                        return Err(Error::TypeNotNumeric(from_col.ty));
+                    }
+                }
+
+                // Ensure that the for is an integer.
+                if let Some(for_expr) = substring_for {
+                    let for_col = self.infer_expr_column(
+                        for_expr,
+                        InferContext::default(),
+                        inferrer,
+                        resolved,
+                    )?;
+                    if !for_col.ty.is_integer() {
+                        return Err(Error::TypeNotNumeric(for_col.ty));
+                    }
+                }
+
+                Column::new(SqlType::Text, str_col.nullable, false)
+            }
             Expr::Identifier(ident) => {
                 let name = &ident.value;
 
@@ -117,12 +180,12 @@ impl Simulator {
             Expr::InList { expr, list, .. } => {
                 let mut nullable = false;
                 let col =
-                    self.infer_expr_column(expr, InferContext::unknown(), inferrer, resolved)?;
+                    self.infer_expr_column(expr, InferContext::default(), inferrer, resolved)?;
 
                 for item in list {
                     let inner_col = self.infer_expr_column(
                         item,
-                        InferContext::with_type(col.ty.clone()),
+                        InferContext::default().with_type(col.ty.clone()),
                         inferrer,
                         resolved,
                     )?;
@@ -144,7 +207,7 @@ impl Simulator {
                         // TODO: Ensure the two types are castable.
                         let inner_col = self.infer_expr_column(
                             expr,
-                            InferContext::unknown(),
+                            InferContext::default(),
                             inferrer,
                             resolved,
                         )?;
@@ -169,7 +232,7 @@ impl Simulator {
                         .map(|(e, col)| {
                             self.infer_expr_column(
                                 e,
-                                InferContext::with_type(col.ty.clone()),
+                                InferContext::default().with_type(col.ty.clone()),
                                 inferrer,
                                 resolved,
                             )
@@ -189,7 +252,7 @@ impl Simulator {
                             .map(|e| {
                                 self.infer_expr_column(
                                     e,
-                                    InferContext::unknown(),
+                                    InferContext::default(),
                                     inferrer,
                                     resolved,
                                 )
@@ -211,18 +274,18 @@ impl Simulator {
                 expr, low, high, ..
             } => {
                 let value =
-                    self.infer_expr_column(expr, InferContext::unknown(), inferrer, resolved)?;
+                    self.infer_expr_column(expr, InferContext::default(), inferrer, resolved)?;
 
                 let low_col = self.infer_expr_column(
                     low,
-                    InferContext::with_type(value.ty.clone()),
+                    InferContext::default().with_type(value.ty.clone()),
                     inferrer,
                     resolved,
                 )?;
 
                 let high_col = self.infer_expr_column(
                     high,
-                    InferContext::with_type(value.ty.clone()),
+                    InferContext::default().with_type(value.ty.clone()),
                     inferrer,
                     resolved,
                 )?;
@@ -420,8 +483,6 @@ impl Simulator {
             Value::Boolean(_) => Ok(Column::new(SqlType::Boolean, false, false)),
             Value::Null => Ok(Column::new(SqlType::Null, false, false)),
             Value::Placeholder(placeholder) => match context.ty {
-                // TODO: Properly pass context down to this point.
-                // Nullability information MUST be accurate by now.
                 Some(ty) => {
                     let col = Column::new(
                         ty,
@@ -429,6 +490,7 @@ impl Simulator {
                         context.default.unwrap_or(false),
                     );
                     resolved.insert_input(placeholder, col.clone());
+
                     Ok(col)
                 }
                 None => Err(Error::Unsupported(
@@ -457,7 +519,7 @@ impl Simulator {
                 let left_col = self.infer_expr_column(left, context, inferrer, resolved)?;
                 let right_col = self.infer_expr_column(
                     right,
-                    InferContext::with_type(left_col.ty.clone()),
+                    InferContext::default().with_type(left_col.ty.clone()),
                     inferrer,
                     resolved,
                 )?;
@@ -474,11 +536,13 @@ impl Simulator {
             | BinaryOperator::Eq
             | BinaryOperator::NotEq => {
                 let left_col =
-                    self.infer_expr_column(left, InferContext::unknown(), inferrer, resolved)?;
+                    self.infer_expr_column(left, InferContext::default(), inferrer, resolved)?;
 
                 let right_col = self.infer_expr_column(
                     right,
-                    InferContext::with_column(left_col.clone()),
+                    InferContext::default()
+                        .with_type(left_col.ty.clone())
+                        .with_nullable(left_col.nullable),
                     inferrer,
                     resolved,
                 )?;
@@ -491,11 +555,11 @@ impl Simulator {
             }
             BinaryOperator::And | BinaryOperator::Or | BinaryOperator::Xor => {
                 let left_col =
-                    self.infer_expr_column(left, InferContext::unknown(), inferrer, resolved)?;
+                    self.infer_expr_column(left, InferContext::default(), inferrer, resolved)?;
 
                 let right_col = self.infer_expr_column(
                     right,
-                    InferContext::with_type(left_col.ty.clone()),
+                    InferContext::default().with_type(left_col.ty.clone()),
                     inferrer,
                     resolved,
                 )?;
@@ -517,7 +581,9 @@ impl Simulator {
 
                 let right_col = self.infer_expr_column(
                     right,
-                    InferContext::with_column(left_col.clone()),
+                    InferContext::default()
+                        .with_type(left_col.ty.clone())
+                        .with_nullable(left_col.nullable),
                     inferrer,
                     resolved,
                 )?;
@@ -537,13 +603,15 @@ impl Simulator {
         &self,
         expr: &Expr,
         op: &UnaryOperator,
-        context: InferContext,
+        _: InferContext,
         inferrer: &I,
         resolved: &mut ResolvedQuery,
     ) -> Result<Column, Error> {
         match op {
             UnaryOperator::Plus | UnaryOperator::Minus => {
-                let col = self.infer_expr_column(expr, context, inferrer, resolved)?;
+                let col =
+                    self.infer_expr_column(expr, InferContext::default(), inferrer, resolved)?;
+
                 if !col.ty.is_numeric() {
                     Err(Error::TypeNotNumeric(col.ty))
                 } else {
@@ -553,7 +621,7 @@ impl Simulator {
             UnaryOperator::Not => {
                 let col = self.infer_expr_column(
                     expr,
-                    InferContext::with_type(SqlType::Boolean),
+                    InferContext::default().with_type(SqlType::Boolean),
                     inferrer,
                     resolved,
                 )?;

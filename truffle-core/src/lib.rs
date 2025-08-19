@@ -79,7 +79,7 @@ pub enum Error {
 #[derive(Debug, Clone)]
 pub struct Simulator {
     pub dialect: Immutable<Arc<dyn Dialect>>,
-    tables: HashMap<String, Table>,
+    pub tables: HashMap<String, Table>,
 }
 
 fn object_name_to_strings(name: &ObjectName) -> Vec<String> {
@@ -169,19 +169,5 @@ impl Simulator {
         }
 
         Ok(resolved)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn invalid_sql() {
-        let mut sim = Simulator::default();
-        assert!(matches!(
-            sim.execute("create eveyrthing (id int);"),
-            Err(Error::Parsing(_))
-        ))
     }
 }
