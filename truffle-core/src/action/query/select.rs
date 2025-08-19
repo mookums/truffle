@@ -1,4 +1,4 @@
-use std::{collections::HashSet, rc::Rc};
+use std::{collections::HashSet, fmt::Debug, rc::Rc};
 
 use itertools::Itertools;
 use sqlparser::ast::{
@@ -226,11 +226,10 @@ impl Simulator {
                                 &mut resolved,
                             )?;
 
-                            // TODO: Determine what to use as Column name for raw value SELECTs
                             resolved.insert_output(
                                 ResolveOutputKey {
                                     qualifier: None,
-                                    name: "value".to_string(),
+                                    name: resolved.outputs.len().to_string(),
                                 },
                                 col,
                             );
