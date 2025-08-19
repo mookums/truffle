@@ -2,7 +2,7 @@ use std::{collections::HashSet, rc::Rc};
 
 use itertools::Itertools;
 use sqlparser::ast::{
-    Expr, Function, Select, SelectItem, SelectItemQualifiedWildcardKind, TableFactor,
+    Expr, Function, Select, SelectItem, SelectItemQualifiedWildcardKind, TableFactor, Value,
 };
 
 use crate::{
@@ -86,6 +86,11 @@ impl Simulator {
                         columns
                             .expect_list_mut()
                             .push(SelectColumn::Function(Box::new(function.clone())));
+                    }
+                    Expr::Value(val) => {
+                        columns
+                            .expect_list_mut()
+                            .push(SelectColumn::Value(val.value.clone()));
                     }
                     _ => {
                         return Err(Error::Unsupported(format!(
@@ -214,6 +219,22 @@ impl Simulator {
                                 col,
                             );
                         }
+                        SelectColumn::Value(val) => {
+                            let col = Self::infer_value_column(
+                                &val,
+                                InferContext::default(),
+                                &mut resolved,
+                            )?;
+
+                            // TODO: Determine what to use as Column name for raw value SELECTs
+                            resolved.insert_output(
+                                ResolveOutputKey {
+                                    qualifier: None,
+                                    name: "value".to_string(),
+                                },
+                                col,
+                            );
+                        }
                     }
                 }
             }
@@ -261,6 +282,7 @@ pub enum SelectColumn {
     },
     Wildcard(String),
     Function(Box<Function>),
+    Value(Value),
 }
 
 fn check_qualifier(ctx: &[JoinContext], name: &str) -> Result<(), Error> {

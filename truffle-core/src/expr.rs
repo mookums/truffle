@@ -313,7 +313,7 @@ impl Simulator {
         Ok(col)
     }
 
-    fn infer_value_column(
+    pub(crate) fn infer_value_column(
         value: &Value,
         context: InferContext,
         resolved: &mut ResolvedQuery,
@@ -481,7 +481,20 @@ impl Simulator {
                 Ok(Column::new(SqlType::Text, false, false))
             }
             Value::Boolean(_) => Ok(Column::new(SqlType::Boolean, false, false)),
-            Value::Null => Ok(Column::new(SqlType::Null, false, false)),
+            Value::Null => {
+                if let Some(ty) = context.ty {
+                    // Can't assign null to non-nullable column.
+                    if context.nullable.is_some_and(|n| !n) {
+                        return Err(Error::NullOnNotNullColumn("".to_string()));
+                    }
+
+                    Ok(Column::new(ty, true, false))
+                } else {
+                    Err(Error::Unsupported(
+                        "Cannot infer type of the NULL".to_string(),
+                    ))
+                }
+            }
             Value::Placeholder(placeholder) => match context.ty {
                 Some(ty) => {
                     let col = Column::new(
