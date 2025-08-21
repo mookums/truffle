@@ -164,7 +164,7 @@ impl Simulator {
             };
 
             for (i, col) in resolved.inputs.iter().enumerate() {
-                if col.ty == SqlType::Null {
+                if matches!(col.ty, SqlType::Unknown(_)) {
                     return Err(Error::MissingPlaceholder(i));
                 }
             }

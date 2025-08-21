@@ -82,6 +82,7 @@ impl Simulator {
         match args {
             FunctionArguments::List(list) => {
                 let mut ty: Option<SqlType> = None;
+                let mut nullable = true;
 
                 for arg in &list.args {
                     match arg {
@@ -89,20 +90,32 @@ impl Simulator {
                             FunctionArgExpr::Expr(expr) => {
                                 let ctx = ty
                                     .as_ref()
-                                    .map(|t| InferContext::default().with_type(t.clone()))
+                                    .map(|t| {
+                                        // placeholders and values to COALESCE can be null.
+                                        InferContext::default()
+                                            .with_type(t.clone())
+                                            .with_nullable(true)
+                                    })
                                     .unwrap_or_else(|| context.clone());
 
                                 let col = self.infer_expr_column(expr, ctx, inferrer, resolved)?;
 
-                                if let Some(ty) = ty.as_ref() {
-                                    if &col.ty != ty {
-                                        return Err(Error::TypeMismatch {
-                                            expected: ty.clone(),
-                                            got: col.ty,
-                                        });
+                                // Nullable only if all columns are nullable,
+                                // otherwise coalesce collapses to not null.
+                                if !col.nullable {
+                                    nullable = false;
+                                }
+
+                                match ty {
+                                    Some(ref ty) => {
+                                        if &col.ty != ty {
+                                            return Err(Error::TypeMismatch {
+                                                expected: ty.clone(),
+                                                got: col.ty,
+                                            });
+                                        }
                                     }
-                                } else {
-                                    ty = Some(col.ty)
+                                    None => ty = Some(col.ty),
                                 }
                             }
                             FunctionArgExpr::QualifiedWildcard(_) => {
@@ -121,7 +134,7 @@ impl Simulator {
                 }
 
                 if let Some(ty) = ty.as_ref() {
-                    Ok(Column::new(ty.clone(), true, false))
+                    Ok(Column::new(ty.clone(), nullable, false))
                 } else {
                     Err(Error::FunctionCall(
                         "Missing arguments for Coalesce".to_string(),

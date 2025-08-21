@@ -1,6 +1,7 @@
-use std::{collections::HashMap, fmt::Display};
+use std::fmt::Display;
 
 use crate::{column::Column, ty::SqlType};
+use indexmap::IndexMap;
 use itertools::Itertools;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
@@ -30,7 +31,7 @@ impl Display for ResolveOutputKey {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ResolvedQuery {
     pub inputs: Vec<Column>,
-    pub outputs: HashMap<ResolveOutputKey, Column>,
+    pub outputs: IndexMap<ResolveOutputKey, Column>,
 }
 
 impl Display for ResolvedQuery {
@@ -77,7 +78,7 @@ impl ResolvedQuery {
             } else {
                 // Extend the Vec then insert.
                 self.inputs.resize_with(index, || Column {
-                    ty: SqlType::Null,
+                    ty: SqlType::Unknown("".to_string()),
                     nullable: false,
                     default: false,
                 });

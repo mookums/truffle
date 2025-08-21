@@ -325,47 +325,27 @@ impl Simulator {
                     match expected_ty {
                         SqlType::SmallInt => {
                             if str.parse::<i16>().is_ok() {
-                                return Ok(Column::new(
-                                    SqlType::SmallInt,
-                                    context.nullable.unwrap_or(false),
-                                    context.default.unwrap_or(false),
-                                ));
+                                return Ok(Column::new(SqlType::SmallInt, false, false));
                             }
                         }
                         SqlType::Integer => {
                             if str.parse::<i32>().is_ok() {
-                                return Ok(Column::new(
-                                    SqlType::Integer,
-                                    context.nullable.unwrap_or(false),
-                                    context.default.unwrap_or(false),
-                                ));
+                                return Ok(Column::new(SqlType::Integer, false, false));
                             }
                         }
                         SqlType::BigInt => {
                             if str.parse::<i64>().is_ok() {
-                                return Ok(Column::new(
-                                    SqlType::BigInt,
-                                    context.nullable.unwrap_or(false),
-                                    context.default.unwrap_or(false),
-                                ));
+                                return Ok(Column::new(SqlType::BigInt, false, false));
                             }
                         }
                         SqlType::Float => {
                             if str.parse::<f32>().is_ok() {
-                                return Ok(Column::new(
-                                    SqlType::Float,
-                                    context.nullable.unwrap_or(false),
-                                    context.default.unwrap_or(false),
-                                ));
+                                return Ok(Column::new(SqlType::Float, false, false));
                             }
                         }
                         SqlType::Double => {
                             if str.parse::<f64>().is_ok() {
-                                return Ok(Column::new(
-                                    SqlType::Double,
-                                    context.nullable.unwrap_or(false),
-                                    context.default.unwrap_or(false),
-                                ));
+                                return Ok(Column::new(SqlType::Double, false, false));
                             }
                         }
                         _ => {}
@@ -409,69 +389,41 @@ impl Simulator {
                             .unwrap();
 
                             if PrimitiveDateTime::parse(str, &format).is_ok() {
-                                return Ok(Column::new(
-                                    SqlType::Timestamp,
-                                    context.nullable.unwrap_or(false),
-                                    context.default.unwrap_or(false),
-                                ));
+                                return Ok(Column::new(SqlType::Timestamp, false, false));
                             }
                         }
                         #[cfg(feature = "time")]
                         SqlType::TimestampTz => {
                             if OffsetDateTime::parse(str, &Iso8601::DEFAULT).is_ok() {
-                                return Ok(Column::new(
-                                    SqlType::TimestampTz,
-                                    context.nullable.unwrap_or(false),
-                                    context.default.unwrap_or(false),
-                                ));
+                                return Ok(Column::new(SqlType::TimestampTz, false, false));
                             }
 
                             if OffsetDateTime::parse(str, &Rfc3339).is_ok() {
-                                return Ok(Column::new(
-                                    SqlType::TimestampTz,
-                                    context.nullable.unwrap_or(false),
-                                    context.default.unwrap_or(false),
-                                ));
+                                return Ok(Column::new(SqlType::TimestampTz, false, false));
                             }
                         }
                         #[cfg(feature = "time")]
                         SqlType::Time => {
                             if Time::parse(str, &Iso8601::DEFAULT).is_ok() {
-                                return Ok(Column::new(
-                                    SqlType::Time,
-                                    context.nullable.unwrap_or(false),
-                                    context.default.unwrap_or(false),
-                                ));
+                                return Ok(Column::new(SqlType::Time, false, false));
                             }
                         }
                         #[cfg(feature = "time")]
                         SqlType::Date => {
                             if Date::parse(str, &Iso8601::DEFAULT).is_ok() {
-                                return Ok(Column::new(
-                                    SqlType::Date,
-                                    context.nullable.unwrap_or(false),
-                                    context.default.unwrap_or(false),
-                                ));
+                                return Ok(Column::new(SqlType::Date, false, false));
                             }
                         }
                         #[cfg(feature = "uuid")]
                         SqlType::Uuid => {
                             if uuid::Uuid::parse_str(str).is_ok() {
-                                return Ok(Column::new(
-                                    SqlType::Uuid,
-                                    context.nullable.unwrap_or(false),
-                                    context.default.unwrap_or(false),
-                                ));
+                                return Ok(Column::new(SqlType::Uuid, false, false));
                             }
                         }
                         #[cfg(feature = "json")]
                         SqlType::Json => {
                             if serde_json::from_str::<serde::de::IgnoredAny>(str).is_ok() {
-                                return Ok(Column::new(
-                                    SqlType::Json,
-                                    context.nullable.unwrap_or(false),
-                                    context.default.unwrap_or(false),
-                                ));
+                                return Ok(Column::new(SqlType::Json, false, false));
                             }
                         }
                         _ => {}

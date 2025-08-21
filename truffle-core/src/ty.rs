@@ -11,8 +11,6 @@ use crate::column::Column;
 #[cfg_attr(feature = "serde", derive(Deserialize, Serialize))]
 #[derive(Debug, Clone, Eq)]
 pub enum SqlType {
-    // NULL
-    Null,
     // Tuple of Types
     Tuple(Vec<Column>),
     /// 16 bit Signed Integer
@@ -67,7 +65,6 @@ impl SqlType {
 impl PartialEq for SqlType {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
-            (SqlType::Null, SqlType::Null) => true,
             (SqlType::Tuple(first), SqlType::Tuple(second)) => {
                 if first.len() != second.len() {
                     return false;
@@ -103,7 +100,6 @@ impl PartialEq for SqlType {
 impl Hash for SqlType {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         match self {
-            SqlType::Null => state.write_u8(0),
             SqlType::SmallInt => state.write_u8(1),
             SqlType::Integer => state.write_u8(2),
             SqlType::BigInt => state.write_u8(3),
