@@ -2,7 +2,8 @@ use std::{collections::HashSet, fmt::Debug, rc::Rc};
 
 use itertools::Itertools;
 use sqlparser::ast::{
-    Expr, Function, Select, SelectItem, SelectItemQualifiedWildcardKind, TableFactor, Value,
+    Expr, Function, GroupByExpr, OrderByKind, Query, SelectItem, SelectItemQualifiedWildcardKind,
+    TableFactor, Value,
 };
 
 use crate::{
@@ -15,10 +16,15 @@ use crate::{
 };
 
 impl Simulator {
-    pub(crate) fn select(&self, sel: &Select) -> Result<ResolvedQuery, Error> {
+    pub(crate) fn select(&self, query: &Query) -> Result<ResolvedQuery, Error> {
         let mut columns = SelectColumns::List(vec![]);
         let mut contexts = vec![];
         let mut resolved = ResolvedQuery::default();
+
+        let sel = query
+            .body
+            .as_select()
+            .expect("Query must be a SELECT by now.");
 
         // Ensure we have a FROM clause.
         if sel.from.is_empty() {
@@ -247,6 +253,54 @@ impl Simulator {
                 &inferrer,
                 &mut resolved,
             )?;
+        }
+
+        // Validate Group By.
+        match &sel.group_by {
+            GroupByExpr::Expressions(exprs, ..) => {
+                for expr in exprs {
+                    let col = self.infer_expr_column(
+                        expr,
+                        InferContext::default(),
+                        &inferrer,
+                        &mut resolved,
+                    )?;
+
+                    // TODO: Ensure type is "comparable".
+                    _ = col;
+                }
+            }
+            _ => todo!("Unsupported GroupByExpr"),
+        }
+
+        // Validate HAVING clause.
+        if let Some(having) = &sel.having {
+            self.infer_expr_column(
+                having,
+                InferContext::default().with_type(SqlType::Boolean),
+                &inferrer,
+                &mut resolved,
+            )?;
+        }
+
+        // Validate Order By
+        if let Some(order_by) = &query.order_by {
+            match &order_by.kind {
+                OrderByKind::Expressions(order_by_exprs) => {
+                    for order_by_expr in order_by_exprs {
+                        let col = self.infer_expr_column(
+                            &order_by_expr.expr,
+                            InferContext::default(),
+                            &inferrer,
+                            &mut resolved,
+                        )?;
+
+                        // TODO: Ensure type is "comparable".
+                        _ = col;
+                    }
+                }
+                _ => todo!("Unsupported OrderByKind"),
+            }
         }
 
         Ok(resolved)

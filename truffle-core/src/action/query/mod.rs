@@ -7,8 +7,8 @@ use crate::{Error, Simulator, resolve::ResolvedQuery};
 
 impl Simulator {
     pub(crate) fn query(&self, query: Box<Query>) -> Result<ResolvedQuery, Error> {
-        if let SetExpr::Select(select) = *query.body {
-            self.select(&select)
+        if let SetExpr::Select(_) = *query.body {
+            self.select(&query)
         } else {
             warn!(query_type = %query.body, "Unsupported Query");
             Ok(ResolvedQuery::default())
