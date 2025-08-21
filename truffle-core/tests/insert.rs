@@ -348,3 +348,31 @@ fn insert_with_returning_aliased_fields_postgres() {
         SqlType::Float
     );
 }
+
+#[test]
+fn insert_with_returning_alias() {
+    let mut sim = Simulator::with_dialect(DialectKind::Postgres);
+    sim.execute(
+        "create table person (id integer not null, name text not null, weight float default 10.2)",
+    )
+    .unwrap();
+
+    let resolve = sim
+            .execute("insert into person as p (id, name, weight) values($1, $2, $3) returning p.id, p.weight as how_heavy")
+            .unwrap();
+
+    assert_eq!(resolve.inputs.len(), 3);
+    assert_eq!(resolve.get_input(0).unwrap().ty, SqlType::Integer);
+    assert_eq!(resolve.get_input(1).unwrap().ty, SqlType::Text);
+    assert_eq!(resolve.get_input(2).unwrap().ty, SqlType::Float);
+
+    assert_eq!(resolve.outputs.len(), 2);
+    assert_eq!(
+        resolve.get_output_with_name("id").unwrap().ty,
+        SqlType::Integer
+    );
+    assert_eq!(
+        resolve.get_output_with_name("how_heavy").unwrap().ty,
+        SqlType::Float
+    );
+}

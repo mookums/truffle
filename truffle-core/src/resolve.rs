@@ -30,6 +30,7 @@ impl Display for ResolveOutputKey {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ResolvedQuery {
+    // TODO: Consider logging if the query will return One or Many result columns?
     pub inputs: Vec<Column>,
     pub outputs: IndexMap<ResolveOutputKey, Column>,
 }

@@ -135,6 +135,7 @@ impl Simulator {
                         inferrer,
                         resolved,
                     )?;
+
                     if !from_col.ty.is_integer() {
                         return Err(Error::TypeNotNumeric(from_col.ty));
                     }
@@ -148,6 +149,7 @@ impl Simulator {
                         inferrer,
                         resolved,
                     )?;
+
                     if !for_col.ty.is_integer() {
                         return Err(Error::TypeNotNumeric(for_col.ty));
                     }

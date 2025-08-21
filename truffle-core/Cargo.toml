@@ -5,19 +5,14 @@ edition = "2024"
 
 [features]
 default = []
-
 # Enable all features
 all = ["time", "json", "uuid", "serde"]
-
 # Enable Time
 time = ["dep:time"]
-
 # Enable JSON
 json = ["dep:serde_json"]
-
 # Enable UUID
 uuid = ["dep:uuid"]
-
 # Enable Serde
 serde = ["indexmap/serde", "sqlparser/serde"]
 
@@ -34,3 +29,10 @@ itertools = "0.14.0"
 uuid = { workspace = true, optional = true }
 serde_json = { workspace = true, optional = true }
 time = { workspace = true, features = ["parsing"], optional = true }
+
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[[bench]]
+name = "select"
+harness = false

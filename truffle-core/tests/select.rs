@@ -132,7 +132,10 @@ fn select_qualified_column_with_unknown_table() {
 
     assert_eq!(
         sim.execute("select unknown_table.id from person"),
-        Err(Error::QualifierDoesntExist("unknown_table".to_string()))
+        Err(Error::QualifiedColumnDoesntExist {
+            qualifier: "unknown_table".to_string(),
+            column: "id".to_string()
+        })
     );
 }
 
@@ -147,7 +150,10 @@ fn select_qualified_column_with_unincluded_table() {
 
     assert_eq!(
         sim.execute("select order.id from person"),
-        Err(Error::QualifierDoesntExist("order".to_string()))
+        Err(Error::QualifiedColumnDoesntExist {
+            qualifier: "order".to_string(),
+            column: "id".to_string()
+        })
     );
 }
 
@@ -894,7 +900,10 @@ fn select_join_natural_chain_non_existing_table() {
 
     assert_eq!(
         sim.execute("select id, x, y, z, v.id from a natural join b natural join c"),
-        Err(Error::QualifierDoesntExist("v".to_string()))
+        Err(Error::QualifiedColumnDoesntExist {
+            qualifier: "v".to_string(),
+            column: "id".to_string()
+        })
     )
 }
 
@@ -1492,3 +1501,93 @@ fn select_with_nonnullable_input() {
     assert_eq!(resolve.inputs.len(), 1);
     assert!(!resolve.inputs.first().unwrap().nullable);
 }
+
+#[test]
+fn select_with_alias() {
+    let mut sim = Simulator::default();
+    let resolve = sim.execute("select 1 as one").unwrap();
+
+    assert_eq!(resolve.outputs.len(), 1);
+    assert_eq!(
+        resolve.outputs.get_index(0).unwrap().1.ty,
+        SqlType::SmallInt
+    );
+}
+
+#[test]
+fn select_with_alias_ambiguous() {
+    let mut sim = Simulator::default();
+
+    sim.execute("create table person (id int primary key, name text not null, value int)")
+        .unwrap();
+
+    assert_eq!(
+        sim.execute("select id, value as id from person"),
+        Err(Error::AmbiguousAlias("id".to_string()))
+    );
+}
+
+#[test]
+fn select_with_alias_in_where() {
+    let mut sim = Simulator::default();
+
+    sim.execute("create table person (id int primary key, name text not null, value int)")
+        .unwrap();
+
+    assert_eq!(
+        sim.execute(
+            "select id, name, (value / 100) as wealth from person where wealth between 10 and 200"
+        ),
+        Err(Error::ColumnDoesntExist("wealth".to_string()))
+    )
+}
+
+// #[test]
+// fn select_with_group_by() {
+//     let mut sim = Simulator::default();
+//     sim.execute("create table person (id int primary key, name text, age int not null)")
+//         .unwrap();
+
+//     let resolve = sim
+//         .execute("select COUNT(id) from person group by age")
+//         .unwrap();
+
+//     assert_eq!(resolve.outputs.len(), 1);
+// }
+
+// #[test]
+// fn select_with_group_by_grouped_column() {
+//     let mut sim = Simulator::default();
+//     sim.execute("create table person (id int primary key, name text, age int not null)")
+//         .unwrap();
+
+//     assert_eq!(
+//         sim.execute("select id from person group by age"),
+//         Err(Error::GroupedColumn("id".to_string()))
+//     );
+// }
+
+// #[test]
+// fn select_with_group_by_column_doesnt_exist() {
+//     let mut sim = Simulator::default();
+//     sim.execute("create table person (id int primary key, name text, age int not null)")
+//         .unwrap();
+
+//     assert_eq!(
+//         sim.execute("select id from person group by weight"),
+//         Err(Error::ColumnDoesntExist("weight".to_string()))
+//     );
+// }
+
+// #[test]
+// fn select_with_having() {
+//     let mut sim = Simulator::default();
+//     sim.execute("create table person (id int primary key, name text not null, age int)")
+//         .unwrap();
+
+//     let resolve = sim
+//         .execute("select COUNT(id), age from person group by age having COUNT(id) > 10")
+//         .unwrap();
+
+//     assert_eq!(resolve.outputs.len(), 2);
+// }

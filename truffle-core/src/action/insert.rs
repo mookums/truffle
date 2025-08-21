@@ -8,6 +8,7 @@ use crate::{
     expr::{ColumnInferrer, InferContext},
     object_name_to_strings,
     resolve::{ResolveOutputKey, ResolvedQuery},
+    table::Table,
 };
 
 impl Simulator {
@@ -36,7 +37,11 @@ impl Simulator {
 
         // This stores the return information for this query.
         let mut resolved = ResolvedQuery::default();
-        let inferrer = InsertInferrer::default();
+        let inferrer = InsertInferrer {
+            table,
+            table_name,
+            alias: alias.as_deref(),
+        };
 
         let source = ins.source.unwrap();
         match *source.body {
@@ -99,41 +104,29 @@ impl Simulator {
                 match item {
                     SelectItem::UnnamedExpr(expr) => match expr {
                         Expr::Identifier(ident) => {
-                            let value = ident.value.clone();
+                            let column = ident.value.clone();
 
-                            if let Some(column) = table.get_column(&value) {
-                                resolved.insert_output(
-                                    ResolveOutputKey {
-                                        qualifier: Some(table_name.clone()),
-                                        name: value,
-                                    },
-                                    column.clone(),
-                                );
-                            } else {
-                                return Err(Error::ColumnDoesntExist(value.to_string()));
-                            }
+                            let true_column = inferrer
+                                .infer_unqualified_column(self, &column)?
+                                .ok_or_else(|| Error::ColumnDoesntExist(column.clone()))?;
+
+                            let key = ResolveOutputKey::new(None, column.to_string());
+
+                            resolved.insert_output(key, true_column.clone());
                         }
                         Expr::CompoundIdentifier(idents) => {
                             let qualifier = &idents.first().unwrap().value;
                             let column_name = &idents.get(1).unwrap().value;
 
-                            if qualifier == table_name
-                                || alias.as_ref().is_some_and(|a| a == qualifier)
-                            {
-                                let column = table.get_column(column_name).ok_or_else(|| {
-                                    Error::ColumnDoesntExist(column_name.to_string())
-                                })?;
+                            let true_column =
+                                inferrer.infer_qualified_column(self, qualifier, column_name)?;
 
-                                resolved.insert_output(
-                                    ResolveOutputKey {
-                                        qualifier: Some(qualifier.clone()),
-                                        name: column_name.clone(),
-                                    },
-                                    column.clone(),
-                                );
-                            } else {
-                                return Err(Error::QualifierDoesntExist(qualifier.to_string()));
-                            }
+                            let key = ResolveOutputKey::new(
+                                Some(qualifier.to_string()),
+                                column_name.to_string(),
+                            );
+
+                            resolved.insert_output(key, true_column.clone());
                         }
                         _ => {
                             return Err(Error::Unsupported(format!(
@@ -142,14 +135,31 @@ impl Simulator {
                         }
                     },
                     SelectItem::ExprWithAlias { expr, alias } => {
-                        return Err(Error::Unsupported(format!(
-                            "Unsupported Select Expr with Alias: expr={expr}, alias={alias}"
-                        )));
+                        let col = self.infer_expr_column(
+                            &expr,
+                            InferContext::default(),
+                            &inferrer,
+                            &mut resolved,
+                        )?;
+
+                        let name = alias.value.to_string();
+
+                        if resolved.get_output_with_name(&name).is_some() {
+                            return Err(Error::AmbiguousAlias(name));
+                        }
+
+                        let key = ResolveOutputKey {
+                            qualifier: None,
+                            name,
+                        };
+
+                        resolved.insert_output(key, col);
                     }
                     SelectItem::QualifiedWildcard(kind, _) => match kind {
                         SelectItemQualifiedWildcardKind::ObjectName(name) => {
                             let qualifier = &object_name_to_strings(&name)[0];
 
+                            // TODO: Have a way to validate an alias through the inferrer.
                             if qualifier == table_name
                                 || alias.as_ref().is_some_and(|a| a == qualifier)
                             {
@@ -191,19 +201,35 @@ impl Simulator {
     }
 }
 
-#[derive(Default)]
-struct InsertInferrer {}
+struct InsertInferrer<'a> {
+    table: &'a Table,
+    table_name: &'a str,
+    alias: Option<&'a str>,
+}
 
-impl ColumnInferrer for InsertInferrer {
-    fn infer_unqualified_column(&self, _: &Simulator, _: &str) -> Result<Option<Column>, Error> {
-        Err(Error::Unsupported(
-            "Can't infer values in INSERT".to_string(),
-        ))
+impl<'a> ColumnInferrer for InsertInferrer<'a> {
+    fn infer_unqualified_column(
+        &self,
+        _: &Simulator,
+        column: &str,
+    ) -> Result<Option<Column>, Error> {
+        Ok(self.table.get_column(column).cloned())
     }
 
-    fn infer_qualified_column(&self, _: &Simulator, _: &str, _: &str) -> Result<Column, Error> {
-        Err(Error::Unsupported(
-            "Can't infer values in INSERT".to_string(),
-        ))
+    fn infer_qualified_column(
+        &self,
+        _: &Simulator,
+        qualifier: &str,
+        column: &str,
+    ) -> Result<Column, Error> {
+        if qualifier == self.table_name || self.alias.is_some_and(|a| a == qualifier) {
+            Ok(self
+                .table
+                .get_column(column)
+                .cloned()
+                .ok_or_else(|| Error::ColumnDoesntExist(column.to_string()))?)
+        } else {
+            Err(Error::QualifierDoesntExist(qualifier.to_string()))
+        }
     }
 }

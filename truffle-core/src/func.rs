@@ -55,6 +55,12 @@ impl Simulator {
                                     .infer_unqualified_column(self, &column_name)?
                                     .ok_or_else(|| Error::ColumnDoesntExist(column_name.clone()))?;
                             }
+                            Expr::CompoundIdentifier(idents) => {
+                                let qualifier = &idents.first().unwrap().value;
+                                let column_name = &idents.get(1).unwrap().value;
+
+                                inferrer.infer_qualified_column(self, qualifier, column_name)?;
+                            }
                             _ => todo!(),
                         },
                         FunctionArgExpr::QualifiedWildcard(_) => {
