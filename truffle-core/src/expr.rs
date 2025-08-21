@@ -63,20 +63,19 @@ impl Simulator {
 
         let col: Column = match expr {
             Expr::Value(val) => Self::infer_value_column(&val.value, context, resolved)?,
-            Expr::IsTrue(expr)
-            | Expr::IsNotTrue(expr)
-            | Expr::IsFalse(expr)
-            | Expr::IsNotFalse(expr) => {
-                self.infer_expr_column(
+            Expr::IsTrue(expr) | Expr::IsFalse(expr) => {
+                let col = self.infer_expr_column(
                     expr,
                     InferContext::default().with_type(SqlType::Boolean),
                     inferrer,
                     resolved,
                 )?;
 
-                Column::new(SqlType::Boolean, false, false)
+                Column::new(SqlType::Boolean, col.nullable, false)
             }
-            Expr::IsUnknown(expr)
+            Expr::IsNotTrue(expr)
+            | Expr::IsNotFalse(expr)
+            | Expr::IsUnknown(expr)
             | Expr::IsNotUnknown(expr)
             | Expr::IsNull(expr)
             | Expr::IsNotNull(expr) => {
@@ -296,6 +295,69 @@ impl Simulator {
                 // TODO: Only allow integers, text and dates.
 
                 Column::new(SqlType::Boolean, false, false)
+            }
+            Expr::Case {
+                operand,
+                conditions,
+                else_result,
+                ..
+            } => {
+                let operand_col = operand
+                    .as_ref()
+                    .map(|o| self.infer_expr_column(o, InferContext::default(), inferrer, resolved))
+                    .transpose()?;
+
+                let mut result_ty: Option<SqlType> = None;
+                let mut nullable = false;
+
+                // Conditions list be empty.
+                assert!(!conditions.is_empty());
+
+                for condition in conditions {
+                    let context = match &operand_col {
+                        Some(col) => InferContext::default().with_type(col.ty.clone()),
+                        None => InferContext::default().with_type(SqlType::Boolean),
+                    };
+
+                    // Validation Condition.
+                    self.infer_expr_column(&condition.condition, context, inferrer, resolved)?;
+
+                    // Validate Result, ensure that they are all the same type.
+                    match result_ty {
+                        Some(ref ty) => {
+                            let val_col = self.infer_expr_column(
+                                &condition.result,
+                                InferContext::default().with_type(ty.clone()),
+                                inferrer,
+                                resolved,
+                            )?;
+
+                            nullable |= val_col.nullable;
+                        }
+                        None => {
+                            let val_col = self.infer_expr_column(
+                                &condition.result,
+                                InferContext::default(),
+                                inferrer,
+                                resolved,
+                            )?;
+
+                            result_ty = Some(val_col.ty);
+                            nullable |= val_col.nullable;
+                        }
+                    }
+                }
+
+                if let Some(else_result) = &else_result {
+                    self.infer_expr_column(
+                        else_result,
+                        InferContext::default().with_type(result_ty.as_ref().unwrap().clone()),
+                        inferrer,
+                        resolved,
+                    )?;
+                }
+
+                Column::new(result_ty.unwrap(), nullable, false)
             }
             _ => return Err(Error::Unsupported(format!("Unsupported Expr: {expr:#?}"))),
         };
@@ -518,6 +580,27 @@ impl Simulator {
                 let nullable = left_col.nullable | right_col.nullable;
                 Ok(Column::new(SqlType::Boolean, nullable, false))
             }
+            BinaryOperator::Spaceship => {
+                let left_col =
+                    self.infer_expr_column(left, InferContext::default(), inferrer, resolved)?;
+
+                let right_col = self.infer_expr_column(
+                    right,
+                    InferContext::default()
+                        .with_type(left_col.ty.clone())
+                        .with_nullable(left_col.nullable),
+                    inferrer,
+                    resolved,
+                )?;
+
+                assert_eq!(left_col.ty, right_col.ty);
+
+                // Spaceship operator collapses nullability.
+                // Both NULL -> true
+                // One NULL -> false
+                // Both NOT NULL -> comparison
+                Ok(Column::new(SqlType::Boolean, false, false))
+            }
             BinaryOperator::And | BinaryOperator::Or | BinaryOperator::Xor => {
                 let left_col =
                     self.infer_expr_column(left, InferContext::default(), inferrer, resolved)?;
@@ -557,6 +640,24 @@ impl Simulator {
 
                 let nullable = left_col.nullable | right_col.nullable;
                 Ok(Column::new(left_col.ty, nullable, false))
+            }
+            BinaryOperator::StringConcat => {
+                let left_col = self.infer_expr_column(
+                    left,
+                    InferContext::default().with_type(SqlType::Text),
+                    inferrer,
+                    resolved,
+                )?;
+                let right_col = self.infer_expr_column(
+                    right,
+                    InferContext::default().with_type(SqlType::Text),
+                    inferrer,
+                    resolved,
+                )?;
+
+                let nullable = left_col.nullable | right_col.nullable;
+
+                Ok(Column::new(SqlType::Text, nullable, false))
             }
             _ => Err(Error::Unsupported(format!(
                 "Unsupported binary operator: {op:?}"
