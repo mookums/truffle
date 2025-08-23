@@ -5,12 +5,12 @@ use indexmap::IndexMap;
 use itertools::Itertools;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
-pub struct ResolveOutputKey {
+pub struct ColumnRef {
     pub qualifier: Option<String>,
     pub name: String,
 }
 
-impl ResolveOutputKey {
+impl ColumnRef {
     pub fn new(qualifier: Option<String>, name: impl ToString) -> Self {
         Self {
             qualifier: qualifier.map(|q| q.to_string()),
@@ -19,7 +19,7 @@ impl ResolveOutputKey {
     }
 }
 
-impl Display for ResolveOutputKey {
+impl Display for ColumnRef {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match &self.qualifier {
             Some(qualifier) => write!(f, "{}.{}", qualifier, self.name),
@@ -32,7 +32,7 @@ impl Display for ResolveOutputKey {
 pub struct ResolvedQuery {
     // TODO: Consider logging if the query will return One or Many result columns?
     pub inputs: Vec<Column>,
-    pub outputs: IndexMap<ResolveOutputKey, Column>,
+    pub outputs: IndexMap<ColumnRef, Column>,
 }
 
 impl Display for ResolvedQuery {
@@ -94,12 +94,12 @@ impl ResolvedQuery {
         self.inputs.insert(index.min(self.inputs.len()), col);
     }
 
-    pub fn insert_output(&mut self, key: ResolveOutputKey, col: Column) {
+    pub fn insert_output(&mut self, key: ColumnRef, col: Column) {
         _ = self.outputs.insert(key, col)
     }
 
     pub fn get_output(&self, qualifier: impl ToString, column: impl ToString) -> Option<&Column> {
-        self.outputs.get(&ResolveOutputKey {
+        self.outputs.get(&ColumnRef {
             qualifier: Some(qualifier.to_string()),
             name: column.to_string(),
         })

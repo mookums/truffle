@@ -2,15 +2,15 @@ use std::{collections::HashSet, rc::Rc};
 
 use itertools::Itertools;
 use sqlparser::ast::{
-    Expr, GroupByExpr, OrderByKind, Query, SelectItem, SelectItemQualifiedWildcardKind, TableFactor,
+    GroupByExpr, OrderByKind, Query, SelectItem, SelectItemQualifiedWildcardKind, TableFactor,
 };
 
 use crate::{
     Error, Simulator,
     action::join::JoinInferrer,
-    expr::{ColumnInferrer, InferContext},
+    expr::InferContext,
     object_name_to_strings,
-    resolve::{ResolveOutputKey, ResolvedQuery},
+    resolve::{ColumnRef, ResolvedQuery},
     ty::SqlType,
 };
 
@@ -26,9 +26,10 @@ impl Simulator {
 
         for from in &sel.from {
             let TableFactor::Table { name, alias, .. } = &from.relation else {
-                return Err(Error::Unsupported(
-                    "Unsupported SELECT relation".to_string(),
-                ));
+                return Err(Error::Unsupported(format!(
+                    "Unsupported Select Relation: {:?}",
+                    from.relation
+                )));
             };
 
             let from_table_name = &object_name_to_strings(name)[0];
@@ -85,73 +86,20 @@ impl Simulator {
 
         for projection in &sel.projection {
             match projection {
-                SelectItem::UnnamedExpr(expr) => match expr {
-                    Expr::Identifier(ident) => {
-                        // Ensure that it is not a group level expr.
-                        let column = ident.value.clone();
+                SelectItem::UnnamedExpr(expr) => {
+                    let col = self.infer_expr_column(
+                        expr,
+                        InferContext::default(),
+                        &inferrer,
+                        &mut resolved,
+                    )?;
 
-                        let true_column = inferrer
-                            .infer_unqualified_column(self, &column)?
-                            .ok_or_else(|| Error::ColumnDoesntExist(column.clone()))?;
+                    let key = self.infer_expr_name(expr)?.unwrap_or_else(|| {
+                        ColumnRef::new(None, resolved.outputs.len().to_string())
+                    });
 
-                        let key = ResolveOutputKey::new(None, column.to_string());
-
-                        resolved.insert_output(key, true_column.clone());
-                    }
-                    Expr::CompoundIdentifier(idents) => {
-                        // Ensure that it is not a group level expr.
-                        let qualifier = &idents.first().unwrap().value;
-                        let column_name = &idents.get(1).unwrap().value;
-
-                        let true_column =
-                            inferrer.infer_qualified_column(self, qualifier, column_name)?;
-
-                        let key = ResolveOutputKey::new(
-                            Some(qualifier.to_string()),
-                            column_name.to_string(),
-                        );
-
-                        resolved.insert_output(key, true_column.clone());
-                    }
-                    Expr::Function(function) => {
-                        let col = self.infer_function_column(
-                            function,
-                            InferContext::default(),
-                            &inferrer,
-                            &mut resolved,
-                        )?;
-
-                        resolved.insert_output(
-                            ResolveOutputKey {
-                                qualifier: None,
-                                name: function.name.to_string().to_lowercase(),
-                            },
-                            col,
-                        );
-                    }
-                    Expr::Value(val) => {
-                        let value = &val.value;
-
-                        let col = Self::infer_value_column(
-                            value,
-                            InferContext::default(),
-                            &mut resolved,
-                        )?;
-
-                        resolved.insert_output(
-                            ResolveOutputKey {
-                                qualifier: None,
-                                name: resolved.outputs.len().to_string(),
-                            },
-                            col,
-                        );
-                    }
-                    _ => {
-                        return Err(Error::Unsupported(format!(
-                            "Unsupported Select Expr: {expr:?}"
-                        )));
-                    }
-                },
+                    resolved.insert_output(key, col);
+                }
                 SelectItem::ExprWithAlias { expr, alias } => {
                     let col = self.infer_expr_column(
                         expr,
@@ -166,10 +114,7 @@ impl Simulator {
                         return Err(Error::AmbiguousAlias(name));
                     }
 
-                    let key = ResolveOutputKey {
-                        qualifier: None,
-                        name,
-                    };
+                    let key = ColumnRef::new(None, name);
 
                     resolved.insert_output(key, col);
                 }
@@ -190,7 +135,7 @@ impl Simulator {
                                     .get_qualified_column(&col_ref.qualifier, &col_ref.name)?;
 
                                 resolved.insert_output(
-                                    ResolveOutputKey::new(
+                                    ColumnRef::new(
                                         Some(col_ref.qualifier.clone()),
                                         col_ref.name.clone(),
                                     ),
@@ -225,7 +170,7 @@ impl Simulator {
                                 let column = context
                                     .get_qualified_column(&col_ref.qualifier, &col_ref.name)?;
 
-                                let key = ResolveOutputKey::new(
+                                let key = ColumnRef::new(
                                     Some(col_ref.qualifier.clone()),
                                     col_ref.name.clone(),
                                 );

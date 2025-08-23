@@ -9,7 +9,12 @@ use time::{
     },
 };
 
-use crate::{Error, Simulator, column::Column, resolve::ResolvedQuery, ty::SqlType};
+use crate::{
+    Error, Simulator,
+    column::Column,
+    resolve::{ColumnRef, ResolvedQuery},
+    ty::SqlType,
+};
 
 #[derive(Debug, Clone, Default)]
 pub struct InferContext {
@@ -203,6 +208,7 @@ impl Simulator {
                 ..
             } => {
                 let ty: SqlType = data_type.clone().into();
+
                 match kind {
                     CastKind::Cast | CastKind::DoubleColon => {
                         // TODO: Ensure the two types are castable.
@@ -269,6 +275,10 @@ impl Simulator {
                 self.infer_function_column(func, context, inferrer, resolved)?
             }
             Expr::Subquery(_) => {
+                // Need to basically seperate out the `self.query()` so it can take some additional parameters
+                // like the infer and the resolved.
+                //
+                // this allows us to have a subquery and query that share the same bones.
                 todo!()
             }
             Expr::Between {
@@ -375,6 +385,19 @@ impl Simulator {
         }
 
         Ok(col)
+    }
+
+    pub(crate) fn infer_expr_name(&self, expr: &Expr) -> Result<Option<ColumnRef>, Error> {
+        match expr {
+            Expr::Identifier(ident) => Ok(Some(ColumnRef::new(None, ident.value.to_string()))),
+            Expr::CompoundIdentifier(idents) => Ok(Some(ColumnRef::new(
+                Some(idents.first().unwrap().value.to_string()),
+                idents.get(1).unwrap().value.to_string(),
+            ))),
+            Expr::Nested(nested) => self.infer_expr_name(nested),
+            Expr::Wildcard(_) | Expr::QualifiedWildcard(_, _) => unreachable!(),
+            _ => Ok(None),
+        }
     }
 
     pub(crate) fn infer_value_column(

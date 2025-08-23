@@ -7,7 +7,7 @@ use crate::{
     column::Column,
     expr::{ColumnInferrer, InferContext},
     object_name_to_strings,
-    resolve::{ResolveOutputKey, ResolvedQuery},
+    resolve::{ColumnRef, ResolvedQuery},
     table::Table,
 };
 
@@ -110,7 +110,7 @@ impl Simulator {
                                 .infer_unqualified_column(self, &column)?
                                 .ok_or_else(|| Error::ColumnDoesntExist(column.clone()))?;
 
-                            let key = ResolveOutputKey::new(None, column.to_string());
+                            let key = ColumnRef::new(None, column.to_string());
 
                             resolved.insert_output(key, true_column.clone());
                         }
@@ -121,7 +121,7 @@ impl Simulator {
                             let true_column =
                                 inferrer.infer_qualified_column(self, qualifier, column_name)?;
 
-                            let key = ResolveOutputKey::new(
+                            let key = ColumnRef::new(
                                 Some(qualifier.to_string()),
                                 column_name.to_string(),
                             );
@@ -148,7 +148,7 @@ impl Simulator {
                             return Err(Error::AmbiguousAlias(name));
                         }
 
-                        let key = ResolveOutputKey {
+                        let key = ColumnRef {
                             qualifier: None,
                             name,
                         };
@@ -165,7 +165,7 @@ impl Simulator {
                             {
                                 for column in table.columns.iter() {
                                     resolved.insert_output(
-                                        ResolveOutputKey {
+                                        ColumnRef {
                                             qualifier: Some(qualifier.clone()),
                                             name: column.0.to_string(),
                                         },
@@ -185,7 +185,7 @@ impl Simulator {
                     SelectItem::Wildcard(_) => {
                         for column in table.columns.iter() {
                             resolved.insert_output(
-                                ResolveOutputKey {
+                                ColumnRef {
                                     qualifier: Some(table_name.clone()),
                                     name: column.0.to_string(),
                                 },

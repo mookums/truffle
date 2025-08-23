@@ -1542,6 +1542,27 @@ fn select_with_alias_in_where() {
     )
 }
 
+#[test]
+fn select_with_expr_as_item() {
+    let mut sim = Simulator::default();
+
+    sim.execute(
+        "create table person (id int primary key, name text not null, age int, weight int, salary)",
+    )
+    .unwrap();
+
+    let resolve = sim
+        .execute("select CAST(COUNT(salary) as REAL) / CAST(COUNT(id) AS REAL) as avg1 from person")
+        .unwrap();
+
+    assert_eq!(resolve.outputs.len(), 1);
+    assert_eq!(resolve.outputs.get_index(0).unwrap().1.ty, SqlType::Float);
+    assert_eq!(
+        resolve.get_output_with_name("avg1").unwrap().ty,
+        SqlType::Float
+    );
+}
+
 // #[test]
 // fn select_with_group_by() {
 //     let mut sim = Simulator::default();

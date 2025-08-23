@@ -6,9 +6,9 @@ use tracing::warn;
 use crate::{Error, Simulator, resolve::ResolvedQuery};
 
 impl Simulator {
-    pub(crate) fn query(&self, query: Box<Query>) -> Result<ResolvedQuery, Error> {
+    pub(crate) fn query(&self, query: &Query) -> Result<ResolvedQuery, Error> {
         if let SetExpr::Select(_) = *query.body {
-            self.select(&query)
+            self.select(query)
         } else {
             warn!(query_type = %query.body, "Unsupported Query");
             Ok(ResolvedQuery::default())

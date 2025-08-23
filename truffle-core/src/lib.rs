@@ -150,7 +150,7 @@ impl Simulator {
             resolved = match statement {
                 Statement::CreateTable(create_table) => self.create_table(create_table)?,
                 // TODO: Support Alter Table
-                Statement::Query(query) => self.query(query)?,
+                Statement::Query(query) => self.query(&query)?,
                 Statement::Update {
                     table,
                     assignments,
