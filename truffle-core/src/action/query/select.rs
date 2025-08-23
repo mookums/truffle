@@ -94,7 +94,7 @@ impl Simulator {
                         &mut resolved,
                     )?;
 
-                    let key = self.infer_expr_name(expr)?.unwrap_or_else(|| {
+                    let key = Self::infer_expr_name(expr)?.unwrap_or_else(|| {
                         ColumnRef::new(None, resolved.outputs.len().to_string())
                     });
 

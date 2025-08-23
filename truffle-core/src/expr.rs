@@ -387,14 +387,14 @@ impl Simulator {
         Ok(col)
     }
 
-    pub(crate) fn infer_expr_name(&self, expr: &Expr) -> Result<Option<ColumnRef>, Error> {
+    pub(crate) fn infer_expr_name(expr: &Expr) -> Result<Option<ColumnRef>, Error> {
         match expr {
             Expr::Identifier(ident) => Ok(Some(ColumnRef::new(None, ident.value.to_string()))),
             Expr::CompoundIdentifier(idents) => Ok(Some(ColumnRef::new(
                 Some(idents.first().unwrap().value.to_string()),
                 idents.get(1).unwrap().value.to_string(),
             ))),
-            Expr::Nested(nested) => self.infer_expr_name(nested),
+            Expr::Nested(nested) => Self::infer_expr_name(nested),
             Expr::Wildcard(_) | Expr::QualifiedWildcard(_, _) => unreachable!(),
             _ => Ok(None),
         }
