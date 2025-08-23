@@ -2390,7 +2390,7 @@ dependencies = [
 
 [[package]]
 name = "truffle"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "criterion",
  "indexmap",
@@ -2407,7 +2407,7 @@ dependencies = [
 
 [[package]]
 name = "truffle-cli"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "clap",
  "rustyline",
@@ -2420,7 +2420,7 @@ dependencies = [
 
 [[package]]
 name = "truffle-loader"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "serde",
  "toml",
@@ -2429,7 +2429,7 @@ dependencies = [
 
 [[package]]
 name = "truffle-sqlx"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "serde_json",
  "time",
@@ -2440,7 +2440,7 @@ dependencies = [
 
 [[package]]
 name = "truffle-sqlx-demo"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "sqlx",
  "tokio",
@@ -2449,7 +2449,7 @@ dependencies = [
 
 [[package]]
 name = "truffle-sqlx-macros"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "proc-macro2",
  "quote",
