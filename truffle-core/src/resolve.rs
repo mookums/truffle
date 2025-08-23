@@ -4,7 +4,11 @@ use crate::{column::Column, ty::SqlType};
 use indexmap::IndexMap;
 use itertools::Itertools;
 
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
+
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Deserialize, Serialize))]
 pub struct ColumnRef {
     pub qualifier: Option<String>,
     pub name: String,
@@ -29,6 +33,7 @@ impl Display for ColumnRef {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Deserialize, Serialize))]
 pub struct ResolvedQuery {
     // TODO: Consider logging if the query will return One or Many result columns?
     pub inputs: Vec<Column>,
