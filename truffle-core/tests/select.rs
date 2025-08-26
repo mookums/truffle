@@ -1697,3 +1697,101 @@ fn select_with_having_nested_grouped_expr() {
 
     assert_eq!(resolve.outputs.len(), 1);
 }
+
+#[test]
+fn select_with_having_deeply_nested_grouped_expr() {
+    let mut sim = Simulator::default();
+    sim.execute(
+        "create table person (id int primary key, name text not null, age int, salary int)",
+    )
+    .unwrap();
+
+    let resolve = sim
+        .execute("select ((age + salary) / 100) * 2 from person group by ((age + salary) / 100) * 2 having COUNT(id) > 5")
+        .unwrap();
+    assert_eq!(resolve.outputs.len(), 1);
+}
+
+#[test]
+fn select_with_having_mixed_nested_scope_error() {
+    let mut sim = Simulator::default();
+    sim.execute(
+        "create table person (id int primary key, name text not null, age int, salary int)",
+    )
+    .unwrap();
+
+    assert_eq!(
+        sim.execute("select age from person group by age having (salary + age) / 100 > 50"),
+        Err(Error::IncompatibleScope)
+    );
+}
+
+#[test]
+fn select_with_having_partial_nested_match() {
+    let mut sim = Simulator::default();
+    sim.execute(
+        "create table person (id int primary key, name text not null, age int, salary int)",
+    )
+    .unwrap();
+
+    assert_eq!(
+        sim.execute(
+            "select (age + salary) / 100 from person group by (age + salary) / 100 having age > 30"
+        ),
+        Err(Error::IncompatibleScope)
+    );
+}
+
+#[test]
+fn select_with_having_complex_nested_valid() {
+    let mut sim = Simulator::default();
+    sim.execute(
+        "create table person (id int primary key, name text not null, age int, salary int)",
+    )
+    .unwrap();
+
+    let resolve = sim
+        .execute("select age + 1, salary * 2 from person group by age + 1, salary * 2 having (age + 1) > 25 AND (salary * 2) > 1000 AND COUNT(id) > 3")
+        .unwrap();
+    assert_eq!(resolve.outputs.len(), 2);
+}
+
+// #[test]
+// fn select_with_having_nested_aggregates() {
+//     let mut sim = Simulator::default();
+//     sim.execute(
+//         "create table person (id int primary key, name text not null, age int, salary int)",
+//     )
+//     .unwrap();
+
+//     let resolve = sim
+//         .execute("select age from person group by age having COUNT(id) > AVG(salary) / 100")
+//         .unwrap();
+//     assert_eq!(resolve.outputs.len(), 1);
+// }
+
+#[test]
+fn select_with_having_subexpression_of_grouped() {
+    let mut sim = Simulator::default();
+    sim.execute(
+        "create table person (id int primary key, name text not null, age int, salary int)",
+    )
+    .unwrap();
+
+    assert_eq!(
+        sim.execute("select (age + salary) * 2 from person group by (age + salary) * 2 having age + salary > 100"),
+        Err(Error::IncompatibleScope)
+    );
+}
+
+#[test]
+fn select_with_having_multiple_nested_levels() {
+    let mut sim = Simulator::default();
+    sim.execute("create table person (id int primary key, name text not null, age int, salary int, bonus int)")
+        .unwrap();
+
+    let resolve = sim
+        .execute("select ((age + salary) / bonus) * 100 from person group by ((age + salary) / bonus) * 100 having COUNT(id) > 0")
+        .unwrap();
+    assert_eq!(resolve.outputs.len(), 1);
+}
