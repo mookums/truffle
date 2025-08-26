@@ -16,19 +16,49 @@ use crate::{
     ty::SqlType,
 };
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Scope {
+    Row,
+    Group,
+    Literal,
+}
+
+impl Scope {
+    pub fn combine(&self, other: &Scope) -> Result<Scope, Error> {
+        match (self, other) {
+            (Scope::Row, Scope::Row) => Ok(Scope::Row),
+            (Scope::Group, Scope::Group) => Ok(Scope::Group),
+            (Scope::Literal, other) | (other, Scope::Literal) => Ok(*other),
+            _ => Err(Error::IncompatibleScope),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct InferredColumn {
+    pub column: Column,
+    pub scope: Scope,
+}
+
 #[derive(Debug, Clone, Default)]
-pub struct InferContext {
+pub struct InferContext<'a> {
     ty: Option<SqlType>,
     nullable: Option<bool>,
     default: Option<bool>,
+    scope: Option<Scope>,
+    inherited_scope: Option<Scope>,
+    grouped: &'a [Expr],
 }
 
-impl InferContext {
+impl<'a> InferContext<'a> {
     pub fn with_type(self, ty: SqlType) -> Self {
         Self {
             ty: Some(ty),
             nullable: self.nullable,
             default: self.default,
+            scope: self.scope,
+            inherited_scope: self.inherited_scope,
+            grouped: self.grouped,
         }
     }
 
@@ -37,6 +67,42 @@ impl InferContext {
             ty: self.ty,
             nullable: Some(nullable),
             default: self.default,
+            scope: self.scope,
+            inherited_scope: self.inherited_scope,
+            grouped: self.grouped,
+        }
+    }
+
+    pub fn with_scope(self, scope: Scope) -> Self {
+        Self {
+            ty: self.ty,
+            nullable: self.nullable,
+            default: self.default,
+            scope: Some(scope),
+            inherited_scope: self.inherited_scope,
+            grouped: self.grouped,
+        }
+    }
+
+    pub fn with_inherited_scope(self, inherited_scope: Scope) -> Self {
+        Self {
+            ty: self.ty,
+            nullable: self.nullable,
+            default: self.default,
+            scope: self.scope,
+            inherited_scope: Some(inherited_scope),
+            grouped: self.grouped,
+        }
+    }
+
+    pub fn with_grouped(self, grouped: &'a [Expr]) -> Self {
+        Self {
+            ty: self.ty,
+            nullable: self.nullable,
+            default: self.default,
+            scope: self.scope,
+            inherited_scope: self.inherited_scope,
+            grouped,
         }
     }
 }
@@ -63,61 +129,103 @@ impl Simulator {
         context: InferContext,
         inferrer: &I,
         resolved: &mut ResolvedQuery,
-    ) -> Result<Column, Error> {
+    ) -> Result<InferredColumn, Error> {
         let expect = context.clone();
 
-        let col: Column = match expr {
+        let mut context = context;
+
+        if context.grouped.contains(expr) {
+            context.scope = Some(Scope::Group);
+            context.inherited_scope = Some(Scope::Group);
+        }
+
+        let inferred: InferredColumn = match expr {
             Expr::Value(val) => Self::infer_value_column(&val.value, context, resolved)?,
             Expr::IsTrue(expr) | Expr::IsFalse(expr) => {
-                let col = self.infer_expr_column(
+                let infer = self.infer_expr_column(
                     expr,
                     InferContext::default().with_type(SqlType::Boolean),
                     inferrer,
                     resolved,
                 )?;
 
-                Column::new(SqlType::Boolean, col.nullable, false)
+                InferredColumn {
+                    column: Column::new(SqlType::Boolean, infer.column.nullable, false),
+                    scope: infer.scope,
+                }
             }
             Expr::IsNotTrue(expr)
             | Expr::IsNotFalse(expr)
             | Expr::IsUnknown(expr)
-            | Expr::IsNotUnknown(expr)
-            | Expr::IsNull(expr)
-            | Expr::IsNotNull(expr) => {
-                self.infer_expr_column(expr, InferContext::default(), inferrer, resolved)?;
-                Column::new(SqlType::Boolean, false, false)
-            }
-            Expr::IsDistinctFrom(left, right) | Expr::IsNotDistinctFrom(left, right) => {
-                let left_col =
-                    self.infer_expr_column(left, InferContext::default(), inferrer, resolved)?;
-                self.infer_expr_column(
-                    right,
-                    InferContext::default().with_type(left_col.ty),
+            | Expr::IsNotUnknown(expr) => {
+                let infer = self.infer_expr_column(
+                    expr,
+                    InferContext::default().with_type(SqlType::Boolean),
                     inferrer,
                     resolved,
                 )?;
 
-                Column::new(SqlType::Boolean, false, false)
+                InferredColumn {
+                    column: Column::new(SqlType::Boolean, false, false),
+                    scope: infer.scope,
+                }
+            }
+            Expr::IsNull(expr) | Expr::IsNotNull(expr) => {
+                let infer =
+                    self.infer_expr_column(expr, InferContext::default(), inferrer, resolved)?;
+
+                InferredColumn {
+                    column: Column::new(SqlType::Boolean, false, false),
+                    scope: infer.scope,
+                }
             }
             Expr::IsNormalized { expr, .. } => {
-                let col = self.infer_expr_column(
+                let infer = self.infer_expr_column(
                     expr,
                     InferContext::default().with_type(SqlType::Text),
                     inferrer,
                     resolved,
                 )?;
 
-                Column::new(SqlType::Boolean, col.nullable, false)
+                InferredColumn {
+                    column: Column::new(SqlType::Boolean, infer.column.nullable, false),
+                    scope: infer.scope,
+                }
+            }
+            Expr::IsDistinctFrom(left, right) | Expr::IsNotDistinctFrom(left, right) => {
+                let left_infer =
+                    self.infer_expr_column(left, InferContext::default(), inferrer, resolved)?;
+
+                let right_infer = self.infer_expr_column(
+                    right,
+                    InferContext::default()
+                        .with_type(left_infer.column.ty.clone())
+                        .with_scope(left_infer.scope),
+                    inferrer,
+                    resolved,
+                )?;
+
+                assert_eq!(left_infer.column.ty, right_infer.column.ty);
+
+                let scope = left_infer.scope.combine(&right_infer.scope)?;
+
+                InferredColumn {
+                    column: Column::new(SqlType::Boolean, false, false),
+                    scope,
+                }
             }
             Expr::Like { expr, .. } | Expr::ILike { expr, .. } => {
-                let col = self.infer_expr_column(
+                let infer = self.infer_expr_column(
                     expr,
                     InferContext::default().with_type(SqlType::Text),
                     inferrer,
                     resolved,
                 )?;
 
-                Column::new(SqlType::Boolean, col.nullable, false)
+                InferredColumn {
+                    column: Column::new(SqlType::Boolean, infer.column.nullable, false),
+                    scope: infer.scope,
+                }
             }
             Expr::Substring {
                 expr,
@@ -125,56 +233,85 @@ impl Simulator {
                 substring_for,
                 ..
             } => {
-                let str_col = self.infer_expr_column(
+                let str_infer = self.infer_expr_column(
                     expr,
                     InferContext::default().with_type(SqlType::Text),
                     inferrer,
                     resolved,
                 )?;
 
+                let mut scope = str_infer.scope;
+
                 // Ensure that the from is an integer.
                 if let Some(from_expr) = substring_from {
-                    let from_col = self.infer_expr_column(
+                    let from_infer = self.infer_expr_column(
                         from_expr,
-                        InferContext::default(),
+                        InferContext::default().with_scope(scope),
                         inferrer,
                         resolved,
                     )?;
 
-                    if !from_col.ty.is_integer() {
-                        return Err(Error::TypeNotNumeric(from_col.ty));
+                    if !from_infer.column.ty.is_integer() {
+                        return Err(Error::TypeNotNumeric(from_infer.column.ty));
                     }
+
+                    scope = scope.combine(&from_infer.scope)?;
                 }
 
                 // Ensure that the for is an integer.
                 if let Some(for_expr) = substring_for {
-                    let for_col = self.infer_expr_column(
+                    let for_infer = self.infer_expr_column(
                         for_expr,
-                        InferContext::default(),
+                        InferContext::default().with_scope(scope),
                         inferrer,
                         resolved,
                     )?;
 
-                    if !for_col.ty.is_integer() {
-                        return Err(Error::TypeNotNumeric(for_col.ty));
+                    if !for_infer.column.ty.is_integer() {
+                        return Err(Error::TypeNotNumeric(for_infer.column.ty));
                     }
+
+                    scope = scope.combine(&for_infer.scope)?;
                 }
 
-                Column::new(SqlType::Text, str_col.nullable, false)
+                InferredColumn {
+                    column: Column::new(SqlType::Text, str_infer.column.nullable, false),
+                    scope,
+                }
             }
             Expr::Identifier(ident) => {
                 let name = &ident.value;
 
-                inferrer
+                let column = inferrer
                     .infer_unqualified_column(self, name)?
-                    .ok_or_else(|| Error::ColumnDoesntExist(name.to_string()))?
+                    .ok_or_else(|| Error::ColumnDoesntExist(name.to_string()))?;
+
+                let scope = if context.grouped.contains(expr)
+                    || context.inherited_scope.is_some_and(|is| is == Scope::Group)
+                {
+                    Scope::Group
+                } else {
+                    Scope::Row
+                };
+
+                InferredColumn { column, scope }
             }
             Expr::CompoundIdentifier(idents) => {
                 // validate that identifier is a column.
                 let qualifier = &idents.first().unwrap().value;
                 let column_name = &idents.get(1).unwrap().value;
 
-                inferrer.infer_qualified_column(self, qualifier, column_name)?
+                let column = inferrer.infer_qualified_column(self, qualifier, column_name)?;
+
+                let scope = if context.grouped.contains(expr)
+                    || context.inherited_scope.is_some_and(|is| is == Scope::Group)
+                {
+                    Scope::Group
+                } else {
+                    Scope::Row
+                };
+
+                InferredColumn { column, scope }
             }
             Expr::BinaryOp { left, right, op } => {
                 self.infer_binary_op_column([left, right], op, context, inferrer, resolved)?
@@ -184,22 +321,30 @@ impl Simulator {
             }
             Expr::Nested(expr) => self.infer_expr_column(expr, context, inferrer, resolved)?,
             Expr::InList { expr, list, .. } => {
-                let mut nullable = false;
-                let col =
+                let infer =
                     self.infer_expr_column(expr, InferContext::default(), inferrer, resolved)?;
 
+                let mut nullable = false;
+                let mut scope = infer.scope;
+
                 for item in list {
-                    let inner_col = self.infer_expr_column(
+                    let inner_infer = self.infer_expr_column(
                         item,
-                        InferContext::default().with_type(col.ty.clone()),
+                        InferContext::default()
+                            .with_type(infer.column.ty.clone())
+                            .with_scope(infer.scope),
                         inferrer,
                         resolved,
                     )?;
 
-                    nullable |= inner_col.nullable;
+                    nullable |= inner_infer.column.nullable;
+                    scope = scope.combine(&inner_infer.scope)?;
                 }
 
-                Column::new(col.ty, nullable, false)
+                InferredColumn {
+                    column: Column::new(infer.column.ty, nullable, false),
+                    scope,
+                }
             }
             Expr::Cast {
                 kind,
@@ -212,14 +357,17 @@ impl Simulator {
                 match kind {
                     CastKind::Cast | CastKind::DoubleColon => {
                         // TODO: Ensure the two types are castable.
-                        let inner_col = self.infer_expr_column(
+                        let infer = self.infer_expr_column(
                             expr,
                             InferContext::default(),
                             inferrer,
                             resolved,
                         )?;
 
-                        Column::new(ty, inner_col.nullable, inner_col.default)
+                        InferredColumn {
+                            column: Column::new(ty, infer.column.nullable, infer.column.default),
+                            scope: infer.scope,
+                        }
                     }
                     _ => todo!(),
                 }
@@ -233,7 +381,7 @@ impl Simulator {
                         });
                     }
 
-                    let inner_tuple_cols: Result<Vec<Column>, Error> = exprs
+                    let inner_tuple_infer: Vec<InferredColumn> = exprs
                         .iter()
                         .zip(cols)
                         .map(|(e, col)| {
@@ -244,31 +392,43 @@ impl Simulator {
                                 resolved,
                             )
                         })
-                        .collect();
+                        .collect::<Result<Vec<InferredColumn>, Error>>()?;
 
-                    Column::new(
-                        SqlType::Tuple(inner_tuple_cols?),
-                        context.nullable.unwrap_or(false),
-                        context.default.unwrap_or(false),
-                    )
+                    let tuple_columns: Vec<_> =
+                        inner_tuple_infer.iter().map(|t| t.column.clone()).collect();
+
+                    let scope = inner_tuple_infer
+                        .iter()
+                        .try_fold(Scope::Literal, |scope, infer| scope.combine(&infer.scope))?;
+
+                    InferredColumn {
+                        column: Column::new(
+                            SqlType::Tuple(tuple_columns),
+                            context.nullable.unwrap_or(false),
+                            context.default.unwrap_or(false),
+                        ),
+                        scope,
+                    }
                 }
                 _ => {
-                    let ty = SqlType::Tuple(
-                        exprs
-                            .iter()
-                            .map(|e| {
-                                self.infer_expr_column(
-                                    e,
-                                    InferContext::default(),
-                                    inferrer,
-                                    resolved,
-                                )
-                                .unwrap()
-                            })
-                            .collect(),
-                    );
+                    let inner_tuple_infer: Vec<InferredColumn> = exprs
+                        .iter()
+                        .map(|e| {
+                            self.infer_expr_column(e, InferContext::default(), inferrer, resolved)
+                        })
+                        .collect::<Result<Vec<InferredColumn>, Error>>()?;
 
-                    Column::new(ty, false, false)
+                    let tuple_columns: Vec<_> =
+                        inner_tuple_infer.iter().map(|t| t.column.clone()).collect();
+
+                    let scope = inner_tuple_infer
+                        .iter()
+                        .try_fold(Scope::Literal, |scope, infer| scope.combine(&infer.scope))?;
+
+                    InferredColumn {
+                        column: Column::new(SqlType::Tuple(tuple_columns), false, false),
+                        scope,
+                    }
                 }
             },
             Expr::Function(func) => {
@@ -284,29 +444,42 @@ impl Simulator {
             Expr::Between {
                 expr, low, high, ..
             } => {
-                let value =
+                let value_infer =
                     self.infer_expr_column(expr, InferContext::default(), inferrer, resolved)?;
 
-                let low_col = self.infer_expr_column(
+                let mut scope = value_infer.scope;
+
+                let low_infer = self.infer_expr_column(
                     low,
-                    InferContext::default().with_type(value.ty.clone()),
+                    InferContext::default()
+                        .with_type(value_infer.column.ty.clone())
+                        .with_scope(scope),
                     inferrer,
                     resolved,
                 )?;
 
-                let high_col = self.infer_expr_column(
+                scope = scope.combine(&low_infer.scope)?;
+
+                let high_infer = self.infer_expr_column(
                     high,
-                    InferContext::default().with_type(value.ty.clone()),
+                    InferContext::default()
+                        .with_type(value_infer.column.ty.clone())
+                        .with_scope(scope),
                     inferrer,
                     resolved,
                 )?;
 
-                assert_eq!(value.ty, low_col.ty);
-                assert_eq!(value.ty, high_col.ty);
+                scope = scope.combine(&high_infer.scope)?;
+
+                assert_eq!(value_infer.column.ty, low_infer.column.ty);
+                assert_eq!(value_infer.column.ty, high_infer.column.ty);
 
                 // TODO: Only allow integers, text and dates.
 
-                Column::new(SqlType::Boolean, false, false)
+                InferredColumn {
+                    column: Column::new(SqlType::Boolean, false, false),
+                    scope,
+                }
             }
             Expr::Case {
                 operand,
@@ -314,77 +487,107 @@ impl Simulator {
                 else_result,
                 ..
             } => {
-                let operand_col = operand
+                let operand_infer = operand
                     .as_ref()
                     .map(|o| self.infer_expr_column(o, InferContext::default(), inferrer, resolved))
                     .transpose()?;
 
                 let mut result_ty: Option<SqlType> = None;
                 let mut nullable = false;
+                let mut scope = operand_infer
+                    .as_ref()
+                    .map(|o| o.scope)
+                    .unwrap_or(Scope::Literal);
 
                 // Conditions list be empty.
                 assert!(!conditions.is_empty());
 
                 for condition in conditions {
-                    let context = match &operand_col {
-                        Some(col) => InferContext::default().with_type(col.ty.clone()),
+                    let context = match &operand_infer {
+                        Some(infer) => InferContext::default()
+                            .with_type(infer.column.ty.clone())
+                            .with_scope(scope),
                         None => InferContext::default().with_type(SqlType::Boolean),
                     };
 
                     // Validation Condition.
-                    self.infer_expr_column(&condition.condition, context, inferrer, resolved)?;
+                    let condition_infer =
+                        self.infer_expr_column(&condition.condition, context, inferrer, resolved)?;
+
+                    scope = scope.combine(&condition_infer.scope)?;
 
                     // Validate Result, ensure that they are all the same type.
                     match result_ty {
                         Some(ref ty) => {
-                            let val_col = self.infer_expr_column(
+                            let val_infer = self.infer_expr_column(
                                 &condition.result,
-                                InferContext::default().with_type(ty.clone()),
+                                InferContext::default()
+                                    .with_type(ty.clone())
+                                    .with_scope(scope),
                                 inferrer,
                                 resolved,
                             )?;
 
-                            nullable |= val_col.nullable;
+                            nullable |= val_infer.column.nullable;
+                            scope = scope.combine(&val_infer.scope)?;
                         }
                         None => {
-                            let val_col = self.infer_expr_column(
+                            let val_infer = self.infer_expr_column(
                                 &condition.result,
-                                InferContext::default(),
+                                InferContext::default().with_scope(scope),
                                 inferrer,
                                 resolved,
                             )?;
 
-                            result_ty = Some(val_col.ty);
-                            nullable |= val_col.nullable;
+                            result_ty = Some(val_infer.column.ty);
+                            nullable |= val_infer.column.nullable;
+                            scope = scope.combine(&val_infer.scope)?;
                         }
                     }
                 }
 
                 if let Some(else_result) = &else_result {
-                    self.infer_expr_column(
+                    let else_infer = self.infer_expr_column(
                         else_result,
-                        InferContext::default().with_type(result_ty.as_ref().unwrap().clone()),
+                        InferContext::default()
+                            .with_type(result_ty.as_ref().unwrap().clone())
+                            .with_scope(scope),
                         inferrer,
                         resolved,
                     )?;
+
+                    scope = scope.combine(&else_infer.scope)?;
                 }
 
-                Column::new(result_ty.unwrap(), nullable, false)
+                InferredColumn {
+                    column: Column::new(result_ty.unwrap(), nullable, false),
+                    scope,
+                }
             }
             _ => return Err(Error::Unsupported(format!("Unsupported Expr: {expr:#?}"))),
         };
 
         // Check the type here.
-        if let Some(expected_ty) = expect.ty {
-            if expected_ty != col.ty {
-                return Err(Error::TypeMismatch {
-                    expected: expected_ty,
-                    got: col.ty,
-                });
-            }
+        if let Some(expected_ty) = expect.ty
+            && expected_ty != inferred.column.ty
+        {
+            return Err(Error::TypeMismatch {
+                expected: expected_ty,
+                got: inferred.column.ty,
+            });
         }
 
-        Ok(col)
+        // Ensure scope compatibility.
+        if let Some(expected_scope) = expect.scope
+            && matches!(
+                (expected_scope, inferred.scope),
+                (Scope::Row, Scope::Group) | (Scope::Group, Scope::Row)
+            )
+        {
+            return Err(Error::IncompatibleScope);
+        }
+
+        Ok(inferred)
     }
 
     pub(crate) fn infer_expr_name(expr: &Expr) -> Result<Option<ColumnRef>, Error> {
@@ -404,59 +607,81 @@ impl Simulator {
         value: &Value,
         context: InferContext,
         resolved: &mut ResolvedQuery,
-    ) -> Result<Column, Error> {
+    ) -> Result<InferredColumn, Error> {
         match value {
             Value::Number(str, _) => {
                 // Initially, try to use the expected type.
                 if let Some(expected_ty) = context.ty {
-                    match expected_ty {
+                    let ty = match expected_ty {
                         SqlType::SmallInt => {
                             if str.parse::<i16>().is_ok() {
-                                return Ok(Column::new(SqlType::SmallInt, false, false));
+                                Some(SqlType::SmallInt)
+                            } else {
+                                None
                             }
                         }
                         SqlType::Integer => {
                             if str.parse::<i32>().is_ok() {
-                                return Ok(Column::new(SqlType::Integer, false, false));
+                                Some(SqlType::Integer)
+                            } else {
+                                None
                             }
                         }
                         SqlType::BigInt => {
                             if str.parse::<i64>().is_ok() {
-                                return Ok(Column::new(SqlType::BigInt, false, false));
+                                Some(SqlType::BigInt)
+                            } else {
+                                None
                             }
                         }
                         SqlType::Float => {
                             if str.parse::<f32>().is_ok() {
-                                return Ok(Column::new(SqlType::Float, false, false));
+                                Some(SqlType::Float)
+                            } else {
+                                None
                             }
                         }
                         SqlType::Double => {
                             if str.parse::<f64>().is_ok() {
-                                return Ok(Column::new(SqlType::Double, false, false));
+                                Some(SqlType::Double)
+                            } else {
+                                None
                             }
                         }
-                        _ => {}
+                        _ => None,
+                    };
+
+                    if let Some(ty) = ty {
+                        return Ok(InferredColumn {
+                            column: Column::new(ty, false, false),
+                            scope: Scope::Literal,
+                        });
                     }
                 };
 
                 // Fallback to smallest type to biggest.
-                if str.parse::<i16>().is_ok() {
-                    Ok(Column::new(SqlType::SmallInt, false, false))
+                let ty = if str.parse::<i16>().is_ok() {
+                    SqlType::SmallInt
                 } else if str.parse::<i32>().is_ok() {
-                    Ok(Column::new(SqlType::Integer, false, false))
+                    SqlType::Integer
                 } else if str.parse::<i64>().is_ok() {
-                    Ok(Column::new(SqlType::BigInt, false, false))
+                    SqlType::BigInt
                 } else if str.contains('.') || str.to_lowercase().contains('e') {
                     if str.parse::<f32>().is_ok() {
-                        Ok(Column::new(SqlType::Float, false, false))
+                        SqlType::Float
                     } else if str.parse::<f64>().is_ok() {
-                        Ok(Column::new(SqlType::Double, false, false))
+                        SqlType::Double
                     } else {
-                        Err(Error::Sql("Invalid floating point number".to_string()))
+                        return Err(Error::Sql("Invalid floating point number".to_string()));
                     }
                 } else {
-                    Err(Error::Sql("Number is too big".to_string()))
-                }
+                    return Err(Error::Sql("Number is too big".to_string()));
+                };
+
+                Ok(InferredColumn {
+                    column: Column::new(ty, false, false),
+                    scope: Scope::Literal,
+                })
             }
 
             #[allow(unused_variables)]
@@ -466,7 +691,7 @@ impl Simulator {
             | Value::NationalStringLiteral(str)
             | Value::HexStringLiteral(str)
             | Value::DoubleQuotedString(str) => {
-                if let Some(expected_ty) = context.ty {
+                let ty = if let Some(expected_ty) = context.ty {
                     match expected_ty {
                         #[cfg(feature = "time")]
                         SqlType::Timestamp => {
@@ -475,51 +700,51 @@ impl Simulator {
                             )
                             .unwrap();
 
-                            if PrimitiveDateTime::parse(str, &format).is_ok() {
-                                return Ok(Column::new(SqlType::Timestamp, false, false));
-                            }
+                            PrimitiveDateTime::parse(str, &format)
+                                .ok()
+                                .map(|_| SqlType::Timestamp)
                         }
                         #[cfg(feature = "time")]
                         SqlType::TimestampTz => {
-                            if OffsetDateTime::parse(str, &Iso8601::DEFAULT).is_ok() {
-                                return Ok(Column::new(SqlType::TimestampTz, false, false));
-                            }
-
-                            if OffsetDateTime::parse(str, &Rfc3339).is_ok() {
-                                return Ok(Column::new(SqlType::TimestampTz, false, false));
-                            }
-                        }
-                        #[cfg(feature = "time")]
-                        SqlType::Time => {
-                            if Time::parse(str, &Iso8601::DEFAULT).is_ok() {
-                                return Ok(Column::new(SqlType::Time, false, false));
+                            if OffsetDateTime::parse(str, &Iso8601::DEFAULT).is_ok()
+                                || OffsetDateTime::parse(str, &Rfc3339).is_ok()
+                            {
+                                Some(SqlType::TimestampTz)
+                            } else {
+                                None
                             }
                         }
                         #[cfg(feature = "time")]
-                        SqlType::Date => {
-                            if Date::parse(str, &Iso8601::DEFAULT).is_ok() {
-                                return Ok(Column::new(SqlType::Date, false, false));
-                            }
-                        }
+                        SqlType::Time => Time::parse(str, &Iso8601::DEFAULT)
+                            .ok()
+                            .map(|_| SqlType::Time),
+                        #[cfg(feature = "time")]
+                        SqlType::Date => Date::parse(str, &Iso8601::DEFAULT)
+                            .ok()
+                            .map(|_| SqlType::Date),
                         #[cfg(feature = "uuid")]
-                        SqlType::Uuid => {
-                            if uuid::Uuid::parse_str(str).is_ok() {
-                                return Ok(Column::new(SqlType::Uuid, false, false));
-                            }
-                        }
+                        SqlType::Uuid => uuid::Uuid::parse_str(str).ok().map(|_| SqlType::Uuid),
                         #[cfg(feature = "json")]
-                        SqlType::Json => {
-                            if serde_json::from_str::<serde::de::IgnoredAny>(str).is_ok() {
-                                return Ok(Column::new(SqlType::Json, false, false));
-                            }
-                        }
-                        _ => {}
+                        SqlType::Json => serde_json::from_str::<serde::de::IgnoredAny>(str)
+                            .ok()
+                            .map(|_| SqlType::Json),
+                        _ => None,
                     }
-                }
+                } else {
+                    None
+                };
 
-                Ok(Column::new(SqlType::Text, false, false))
+                let real_ty = ty.unwrap_or(SqlType::Text);
+
+                Ok(InferredColumn {
+                    column: Column::new(real_ty, false, false),
+                    scope: Scope::Literal,
+                })
             }
-            Value::Boolean(_) => Ok(Column::new(SqlType::Boolean, false, false)),
+            Value::Boolean(_) => Ok(InferredColumn {
+                column: Column::new(SqlType::Boolean, false, false),
+                scope: Scope::Literal,
+            }),
             Value::Null => {
                 if let Some(ty) = context.ty {
                     // Can't assign null to non-nullable column.
@@ -527,7 +752,10 @@ impl Simulator {
                         return Err(Error::NullOnNotNullColumn("".to_string()));
                     }
 
-                    Ok(Column::new(ty, true, false))
+                    Ok(InferredColumn {
+                        column: Column::new(ty, true, false),
+                        scope: Scope::Row,
+                    })
                 } else {
                     Err(Error::Unsupported(
                         "Cannot infer type of the NULL".to_string(),
@@ -541,9 +769,13 @@ impl Simulator {
                         context.nullable.unwrap_or(false),
                         context.default.unwrap_or(false),
                     );
+
                     resolved.insert_input(placeholder, col.clone());
 
-                    Ok(col)
+                    Ok(InferredColumn {
+                        column: col,
+                        scope: Scope::Row,
+                    })
                 }
                 None => Err(Error::Unsupported(
                     "Cannot infer type of the placeholder".to_string(),
@@ -560,7 +792,7 @@ impl Simulator {
         context: InferContext,
         inferrer: &I,
         resolved: &mut ResolvedQuery,
-    ) -> Result<Column, Error> {
+    ) -> Result<InferredColumn, Error> {
         let [left, right] = exprs;
         match op {
             BinaryOperator::Plus
@@ -568,18 +800,29 @@ impl Simulator {
             | BinaryOperator::Multiply
             | BinaryOperator::Divide
             | BinaryOperator::Modulo => {
-                let left_col = self.infer_expr_column(left, context, inferrer, resolved)?;
-                let right_col = self.infer_expr_column(
+                let left_infer =
+                    self.infer_expr_column(left, context.clone(), inferrer, resolved)?;
+
+                let right_infer = self.infer_expr_column(
                     right,
-                    InferContext::default().with_type(left_col.ty.clone()),
+                    InferContext::default()
+                        .with_type(left_infer.column.ty.clone())
+                        .with_nullable(left_infer.column.nullable)
+                        .with_scope(left_infer.scope)
+                        .with_grouped(context.grouped),
                     inferrer,
                     resolved,
                 )?;
 
-                assert_eq!(left_col.ty, right_col.ty);
+                assert_eq!(left_infer.column.ty, right_infer.column.ty);
 
-                let nullable = left_col.nullable | right_col.nullable;
-                Ok(Column::new(left_col.ty, nullable, false))
+                let nullable = left_infer.column.nullable | right_infer.column.nullable;
+                let scope = left_infer.scope.combine(&right_infer.scope)?;
+
+                Ok(InferredColumn {
+                    column: Column::new(left_infer.column.ty, nullable, false),
+                    scope,
+                })
             }
             BinaryOperator::Gt
             | BinaryOperator::Lt
@@ -587,102 +830,136 @@ impl Simulator {
             | BinaryOperator::LtEq
             | BinaryOperator::Eq
             | BinaryOperator::NotEq => {
-                let left_col =
+                let left_infer =
                     self.infer_expr_column(left, InferContext::default(), inferrer, resolved)?;
 
-                let right_col = self.infer_expr_column(
+                let right_infer = self.infer_expr_column(
                     right,
                     InferContext::default()
-                        .with_type(left_col.ty.clone())
-                        .with_nullable(left_col.nullable),
+                        .with_type(left_infer.column.ty.clone())
+                        .with_nullable(left_infer.column.nullable)
+                        .with_scope(left_infer.scope),
                     inferrer,
                     resolved,
                 )?;
 
-                assert_eq!(left_col.ty, right_col.ty);
+                assert_eq!(left_infer.column.ty, right_infer.column.ty);
 
                 // Resulting column is only nullable if either of the two are.
-                let nullable = left_col.nullable | right_col.nullable;
-                Ok(Column::new(SqlType::Boolean, nullable, false))
+                let nullable = left_infer.column.nullable | right_infer.column.nullable;
+                let scope = left_infer.scope.combine(&right_infer.scope)?;
+
+                Ok(InferredColumn {
+                    column: Column::new(SqlType::Boolean, nullable, false),
+                    scope,
+                })
             }
             BinaryOperator::Spaceship => {
-                let left_col =
+                let left_infer =
                     self.infer_expr_column(left, InferContext::default(), inferrer, resolved)?;
 
-                let right_col = self.infer_expr_column(
+                let right_infer = self.infer_expr_column(
                     right,
                     InferContext::default()
-                        .with_type(left_col.ty.clone())
-                        .with_nullable(left_col.nullable),
+                        .with_type(left_infer.column.ty.clone())
+                        .with_nullable(left_infer.column.nullable)
+                        .with_scope(left_infer.scope),
                     inferrer,
                     resolved,
                 )?;
 
-                assert_eq!(left_col.ty, right_col.ty);
+                assert_eq!(left_infer.column.ty, right_infer.column.ty);
+
+                let scope = left_infer.scope.combine(&right_infer.scope)?;
 
                 // Spaceship operator collapses nullability.
                 // Both NULL -> true
                 // One NULL -> false
                 // Both NOT NULL -> comparison
-                Ok(Column::new(SqlType::Boolean, false, false))
+                Ok(InferredColumn {
+                    column: Column::new(SqlType::Boolean, false, false),
+                    scope,
+                })
             }
             BinaryOperator::And | BinaryOperator::Or | BinaryOperator::Xor => {
-                let left_col =
+                let left_infer =
                     self.infer_expr_column(left, InferContext::default(), inferrer, resolved)?;
 
-                let right_col = self.infer_expr_column(
+                let right_infer = self.infer_expr_column(
                     right,
-                    InferContext::default().with_type(left_col.ty.clone()),
+                    InferContext::default()
+                        .with_type(left_infer.column.ty.clone())
+                        .with_nullable(left_infer.column.nullable)
+                        .with_scope(left_infer.scope),
                     inferrer,
                     resolved,
                 )?;
 
-                assert_eq!(left_col.ty, right_col.ty);
+                assert_eq!(left_infer.column.ty, right_infer.column.ty);
 
-                let nullable = left_col.nullable | right_col.nullable;
-                Ok(Column::new(SqlType::Boolean, nullable, false))
+                let nullable = left_infer.column.nullable | right_infer.column.nullable;
+                let scope = left_infer.scope.combine(&right_infer.scope)?;
+
+                Ok(InferredColumn {
+                    column: Column::new(SqlType::Boolean, nullable, false),
+                    scope,
+                })
             }
             BinaryOperator::BitwiseOr | BinaryOperator::BitwiseAnd | BinaryOperator::BitwiseXor => {
-                let left_col = self.infer_expr_column(left, context, inferrer, resolved)?;
+                let left_infer = self.infer_expr_column(left, context, inferrer, resolved)?;
 
-                if !left_col.ty.is_integer() {
+                if !left_infer.column.ty.is_integer() {
                     return Err(Error::TypeMismatch {
                         expected: SqlType::Integer,
-                        got: left_col.ty,
+                        got: left_infer.column.ty,
                     });
                 }
 
-                let right_col = self.infer_expr_column(
+                let right_infer = self.infer_expr_column(
                     right,
                     InferContext::default()
-                        .with_type(left_col.ty.clone())
-                        .with_nullable(left_col.nullable),
+                        .with_type(left_infer.column.ty.clone())
+                        .with_nullable(left_infer.column.nullable)
+                        .with_scope(left_infer.scope),
                     inferrer,
                     resolved,
                 )?;
 
-                assert_eq!(left_col.ty, right_col.ty);
+                assert_eq!(left_infer.column.ty, right_infer.column.ty);
 
-                let nullable = left_col.nullable | right_col.nullable;
-                Ok(Column::new(left_col.ty, nullable, false))
+                let nullable = left_infer.column.nullable | right_infer.column.nullable;
+                let scope = left_infer.scope.combine(&right_infer.scope)?;
+
+                Ok(InferredColumn {
+                    column: Column::new(left_infer.column.ty, nullable, false),
+                    scope,
+                })
             }
             BinaryOperator::StringConcat => {
-                let left_col = self.infer_expr_column(
+                let left_infer = self.infer_expr_column(
                     left,
                     InferContext::default().with_type(SqlType::Text),
                     inferrer,
                     resolved,
                 )?;
-                let right_col = self.infer_expr_column(
+
+                let right_infer = self.infer_expr_column(
                     right,
-                    InferContext::default().with_type(SqlType::Text),
+                    InferContext::default()
+                        .with_type(SqlType::Text)
+                        .with_nullable(left_infer.column.nullable)
+                        .with_scope(left_infer.scope),
                     inferrer,
                     resolved,
                 )?;
 
-                let nullable = left_col.nullable | right_col.nullable;
+                let nullable = left_infer.column.nullable | right_infer.column.nullable;
+                let scope = left_infer.scope.combine(&right_infer.scope)?;
 
-                Ok(Column::new(SqlType::Text, nullable, false))
+                Ok(InferredColumn {
+                    column: Column::new(SqlType::Text, nullable, false),
+                    scope,
+                })
             }
             _ => Err(Error::Unsupported(format!(
                 "Unsupported binary operator: {op:?}"
@@ -697,28 +974,28 @@ impl Simulator {
         _: InferContext,
         inferrer: &I,
         resolved: &mut ResolvedQuery,
-    ) -> Result<Column, Error> {
+    ) -> Result<InferredColumn, Error> {
         match op {
             UnaryOperator::Plus | UnaryOperator::Minus => {
-                let col =
+                let infer =
                     self.infer_expr_column(expr, InferContext::default(), inferrer, resolved)?;
 
-                if !col.ty.is_numeric() {
-                    Err(Error::TypeNotNumeric(col.ty))
+                if !infer.column.ty.is_numeric() {
+                    Err(Error::TypeNotNumeric(infer.column.ty))
                 } else {
-                    Ok(col)
+                    Ok(infer)
                 }
             }
             UnaryOperator::Not => {
-                let col = self.infer_expr_column(
+                let infer = self.infer_expr_column(
                     expr,
                     InferContext::default().with_type(SqlType::Boolean),
                     inferrer,
                     resolved,
                 )?;
 
-                assert_eq!(col.ty, SqlType::Boolean);
-                Ok(col)
+                assert_eq!(infer.column.ty, SqlType::Boolean);
+                Ok(infer)
             }
             _ => Err(Error::Unsupported(format!(
                 "Unsupported unary operator: {op:?}"

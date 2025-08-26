@@ -29,10 +29,10 @@ impl Simulator {
                         .get_table(from_table_name)
                         .ok_or_else(|| Error::TableDoesntExist(from_table_name.clone()))?;
 
-                    if let Some(alias) = &from_table_alias {
-                        if self.has_table(alias) {
-                            return Err(Error::AliasIsTableName(alias.to_string()));
-                        }
+                    if let Some(alias) = &from_table_alias
+                        && self.has_table(alias)
+                    {
+                        return Err(Error::AliasIsTableName(alias.to_string()));
                     }
 
                     let join_table = self.infer_joins(
@@ -58,17 +58,17 @@ impl Simulator {
         };
 
         if let Some(selection) = delete.selection {
-            let col = self.infer_expr_column(
+            let infer = self.infer_expr_column(
                 &selection,
                 InferContext::default().with_type(SqlType::Boolean),
                 &inferrer,
                 &mut resolved,
             )?;
 
-            if col.ty != SqlType::Boolean {
+            if infer.column.ty != SqlType::Boolean {
                 return Err(Error::TypeMismatch {
                     expected: SqlType::Boolean,
-                    got: col.ty,
+                    got: infer.column.ty,
                 });
             }
         }

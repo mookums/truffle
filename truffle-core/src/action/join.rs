@@ -126,17 +126,17 @@ impl Simulator {
                     ),
                 };
 
-                let col = self.infer_expr_column(
+                let infer = self.infer_expr_column(
                     expr,
                     InferContext::default().with_type(SqlType::Boolean),
                     &inferrer,
                     resolved,
                 )?;
 
-                if col.ty != SqlType::Boolean {
+                if infer.column.ty != SqlType::Boolean {
                     return Err(Error::TypeMismatch {
                         expected: SqlType::Boolean,
-                        got: col.ty,
+                        got: infer.column.ty,
                     });
                 }
 

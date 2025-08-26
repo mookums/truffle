@@ -7,7 +7,7 @@ fn update_is_unknown() {
     sim.execute("create table item (id int primary key, name text not null, age integer)")
         .unwrap();
 
-    sim.execute("update item set age = null where (age + 2) is unknown")
+    sim.execute("update item set age = null where (age = 2) is unknown")
         .unwrap();
 }
 
@@ -18,6 +18,6 @@ fn select_is_not_unknown() {
     sim.execute("create table item (id int primary key, name text not null, age integer)")
         .unwrap();
 
-    sim.execute("select * from item where (age + 2) is not unknown")
+    sim.execute("select * from item where (age = 2) is not unknown")
         .unwrap();
 }

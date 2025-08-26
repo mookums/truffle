@@ -1563,52 +1563,137 @@ fn select_with_expr_as_item() {
     );
 }
 
-// #[test]
-// fn select_with_group_by() {
-//     let mut sim = Simulator::default();
-//     sim.execute("create table person (id int primary key, name text, age int not null)")
-//         .unwrap();
+#[test]
+fn select_prevent_scope_mixing() {
+    let mut sim = Simulator::default();
 
-//     let resolve = sim
-//         .execute("select COUNT(id) from person group by age")
-//         .unwrap();
+    sim.execute(
+        "create table person (id int primary key, name text not null, age int, weight int, salary)",
+    )
+    .unwrap();
 
-//     assert_eq!(resolve.outputs.len(), 1);
-// }
+    assert_eq!(
+        sim.execute("select id, COUNT(id) from person"),
+        Err(Error::IncompatibleScope)
+    );
+}
 
-// #[test]
-// fn select_with_group_by_grouped_column() {
-//     let mut sim = Simulator::default();
-//     sim.execute("create table person (id int primary key, name text, age int not null)")
-//         .unwrap();
+#[test]
+fn select_prevent_scope_mixing_wildcard() {
+    let mut sim = Simulator::default();
 
-//     assert_eq!(
-//         sim.execute("select id from person group by age"),
-//         Err(Error::GroupedColumn("id".to_string()))
-//     );
-// }
+    sim.execute(
+        "create table person (id int primary key, name text not null, age int, weight int, salary)",
+    )
+    .unwrap();
 
-// #[test]
-// fn select_with_group_by_column_doesnt_exist() {
-//     let mut sim = Simulator::default();
-//     sim.execute("create table person (id int primary key, name text, age int not null)")
-//         .unwrap();
+    assert_eq!(
+        sim.execute("select *, COUNT(id) from person"),
+        Err(Error::IncompatibleScope)
+    );
+}
 
-//     assert_eq!(
-//         sim.execute("select id from person group by weight"),
-//         Err(Error::ColumnDoesntExist("weight".to_string()))
-//     );
-// }
+#[test]
+fn select_prevent_scope_mixing_qualified_wildcard() {
+    let mut sim = Simulator::default();
 
-// #[test]
-// fn select_with_having() {
-//     let mut sim = Simulator::default();
-//     sim.execute("create table person (id int primary key, name text not null, age int)")
-//         .unwrap();
+    sim.execute(
+        "create table person (id int primary key, name text not null, age int, weight int, salary)",
+    )
+    .unwrap();
 
-//     let resolve = sim
-//         .execute("select COUNT(id), age from person group by age having COUNT(id) > 10")
-//         .unwrap();
+    assert_eq!(
+        sim.execute("select person.*, COUNT(id) from person"),
+        Err(Error::IncompatibleScope)
+    );
+}
 
-//     assert_eq!(resolve.outputs.len(), 2);
-// }
+#[test]
+fn select_prevent_scope_mixing_case() {
+    let mut sim = Simulator::default();
+
+    sim.execute(
+        "create table person (id int primary key, name text not null, age int, weight int, salary)",
+    )
+    .unwrap();
+
+    assert_eq!(
+        sim.execute("select CASE WHEN id > 5 THEN COUNT(id) ELSE id END from person"),
+        Err(Error::IncompatibleScope)
+    );
+}
+
+#[test]
+fn select_with_group_by() {
+    let mut sim = Simulator::default();
+    sim.execute("create table person (id int primary key, name text, age int not null)")
+        .unwrap();
+
+    let resolve = sim
+        .execute("select COUNT(id) from person group by age")
+        .unwrap();
+
+    assert_eq!(resolve.outputs.len(), 1);
+}
+
+#[test]
+fn select_with_group_by_grouped_column() {
+    let mut sim = Simulator::default();
+    sim.execute("create table person (id int primary key, name text, age int not null)")
+        .unwrap();
+
+    assert_eq!(
+        sim.execute("select id from person group by age"),
+        Err(Error::IncompatibleScope)
+    );
+}
+
+#[test]
+fn select_with_group_by_column_doesnt_exist() {
+    let mut sim = Simulator::default();
+    sim.execute("create table person (id int primary key, name text, age int not null)")
+        .unwrap();
+
+    assert_eq!(
+        sim.execute("select id from person group by weight"),
+        Err(Error::ColumnDoesntExist("weight".to_string()))
+    );
+}
+
+#[test]
+fn select_with_having() {
+    let mut sim = Simulator::default();
+    sim.execute("create table person (id int primary key, name text not null, age int)")
+        .unwrap();
+
+    let resolve = sim
+        .execute("select COUNT(id), age from person group by age having COUNT(id) > 10")
+        .unwrap();
+
+    assert_eq!(resolve.outputs.len(), 2);
+}
+
+#[test]
+fn select_with_having_incorrect_scope() {
+    let mut sim = Simulator::default();
+    sim.execute("create table person (id int primary key, name text not null, age int)")
+        .unwrap();
+
+    assert_eq!(
+        sim.execute("select COUNT(id), age from person group by age having name = 'abc'"),
+        Err(Error::IncompatibleScope)
+    );
+}
+
+#[test]
+fn select_with_having_nested_grouped_expr() {
+    let mut sim = Simulator::default();
+    sim.execute("create table person (id int primary key, name text not null, age int)")
+        .unwrap();
+
+    let resolve = sim
+        .execute("select (age / 200) + 10 from person group by age / 200 having COUNT(id) > 10")
+        .unwrap();
+
+    assert_eq!(resolve.outputs.len(), 1);
+}

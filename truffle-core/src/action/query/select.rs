@@ -2,13 +2,13 @@ use std::{collections::HashSet, rc::Rc};
 
 use itertools::Itertools;
 use sqlparser::ast::{
-    GroupByExpr, OrderByKind, Query, SelectItem, SelectItemQualifiedWildcardKind, TableFactor,
+    GroupByExpr, Query, SelectItem, SelectItemQualifiedWildcardKind, TableFactor,
 };
 
 use crate::{
     Error, Simulator,
     action::join::JoinInferrer,
-    expr::InferContext,
+    expr::{InferContext, Scope},
     object_name_to_strings,
     resolve::{ColumnRef, ResolvedQuery},
     ty::SqlType,
@@ -41,10 +41,10 @@ impl Simulator {
                 .ok_or_else(|| Error::TableDoesntExist(from_table_name.clone()))?;
 
             // Ensure that the alias isn't a table name.
-            if let Some(alias) = &from_table_alias {
-                if self.has_table(alias) {
-                    return Err(Error::AliasIsTableName(alias.to_string()));
-                }
+            if let Some(alias) = &from_table_alias
+                && self.has_table(alias)
+            {
+                return Err(Error::AliasIsTableName(alias.to_string()));
             }
 
             let join_table = self.infer_joins(
@@ -62,51 +62,95 @@ impl Simulator {
             join_contexts: &contexts,
         };
 
+        // Validate WHERE clause.
+        if let Some(selection) = &sel.selection {
+            self.infer_expr_column(
+                selection,
+                InferContext::default()
+                    .with_type(SqlType::Boolean)
+                    .with_scope(Scope::Row),
+                &inferrer,
+                &mut resolved,
+            )?;
+        }
+
+        let mut grouped_exprs = Vec::new();
+
         // Validate Group By.
         match &sel.group_by {
             GroupByExpr::Expressions(exprs, ..) => {
                 for expr in exprs {
-                    let col = self.infer_expr_column(
+                    let infer = self.infer_expr_column(
                         expr,
-                        InferContext::default(),
+                        InferContext::default().with_scope(Scope::Row),
                         &inferrer,
                         &mut resolved,
                     )?;
+
+                    grouped_exprs.push(expr.clone());
 
                     // We need to figure out a way to basically pass this information down the chain.
                     // Ensuring that we only do compatible operations on Grouped or NonGrouped columns.
 
                     // TODO: ensure type is comparable
 
-                    _ = col;
+                    _ = infer;
                 }
             }
             _ => todo!("Unsupported GroupByExpr"),
         }
 
+        let mut scope = if grouped_exprs.is_empty() {
+            Scope::Literal
+        } else {
+            Scope::Group
+        };
+
+        // Validate HAVING clause.
+        if let Some(having) = &sel.having {
+            self.infer_expr_column(
+                having,
+                InferContext::default()
+                    .with_type(SqlType::Boolean)
+                    .with_scope(Scope::Group)
+                    .with_grouped(&grouped_exprs),
+                &inferrer,
+                &mut resolved,
+            )?;
+        }
+
         for projection in &sel.projection {
             match projection {
                 SelectItem::UnnamedExpr(expr) => {
-                    let col = self.infer_expr_column(
+                    // If we are grouped and this expression isn't, return an Error.
+                    let infer = self.infer_expr_column(
                         expr,
-                        InferContext::default(),
+                        InferContext::default()
+                            .with_scope(scope)
+                            .with_grouped(&grouped_exprs),
                         &inferrer,
                         &mut resolved,
                     )?;
+
+                    scope = scope.combine(&infer.scope)?;
 
                     let key = Self::infer_expr_name(expr)?.unwrap_or_else(|| {
                         ColumnRef::new(None, resolved.outputs.len().to_string())
                     });
 
-                    resolved.insert_output(key, col);
+                    resolved.insert_output(key, infer.column);
                 }
                 SelectItem::ExprWithAlias { expr, alias } => {
-                    let col = self.infer_expr_column(
+                    let infer = self.infer_expr_column(
                         expr,
-                        InferContext::default(),
+                        InferContext::default()
+                            .with_scope(scope)
+                            .with_grouped(&grouped_exprs),
                         &inferrer,
                         &mut resolved,
                     )?;
+
+                    scope = scope.combine(&infer.scope)?;
 
                     let name = alias.value.to_string();
 
@@ -116,7 +160,7 @@ impl Simulator {
 
                     let key = ColumnRef::new(None, name);
 
-                    resolved.insert_output(key, col);
+                    resolved.insert_output(key, infer.column);
                 }
                 SelectItem::QualifiedWildcard(kind, _) => match kind {
                     SelectItemQualifiedWildcardKind::ObjectName(name) => {
@@ -145,6 +189,8 @@ impl Simulator {
                                 found = true;
                             }
                         }
+
+                        scope = scope.combine(&Scope::Row)?;
 
                         if !found {
                             return Err(Error::QualifierDoesntExist(qualifier.to_string()));
@@ -180,50 +226,31 @@ impl Simulator {
                             }
                         }
                     }
-                    break;
+
+                    scope = scope.combine(&Scope::Row)?;
                 }
             }
         }
-
-        // Validate WHERE clause.
-        if let Some(selection) = &sel.selection {
-            self.infer_expr_column(
-                selection,
-                InferContext::default().with_type(SqlType::Boolean),
-                &inferrer,
-                &mut resolved,
-            )?;
-        }
-
-        // Validate HAVING clause.
-        // if let Some(having) = &sel.having {
-        //     self.infer_expr_column(
-        //         having,
-        //         InferContext::default().with_type(SqlType::Boolean),
-        //         &inferrer,
-        //         &mut resolved,
-        //     )?;
-        // }
 
         // Validate Order By
-        if let Some(order_by) = &query.order_by {
-            match &order_by.kind {
-                OrderByKind::Expressions(order_by_exprs) => {
-                    for order_by_expr in order_by_exprs {
-                        let col = self.infer_expr_column(
-                            &order_by_expr.expr,
-                            InferContext::default(),
-                            &inferrer,
-                            &mut resolved,
-                        )?;
+        // if let Some(order_by) = &query.order_by {
+        //     match &order_by.kind {
+        //         OrderByKind::Expressions(order_by_exprs) => {
+        //             for order_by_expr in order_by_exprs {
+        //                 let col = self.infer_expr_column(
+        //                     &order_by_expr.expr,
+        //                     InferContext::default().with_scope(Scope::Row),
+        //                     &inferrer,
+        //                     &mut resolved,
+        //                 )?;
 
-                        // TODO: Ensure type is "comparable".
-                        _ = col;
-                    }
-                }
-                _ => todo!("Unsupported OrderByKind"),
-            }
-        }
+        //                 // TODO: Ensure type is "comparable".
+        //                 _ = col;
+        //             }
+        //         }
+        //         _ => todo!("Unsupported OrderByKind"),
+        //     }
+        // }
 
         Ok(resolved)
     }

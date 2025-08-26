@@ -3,7 +3,7 @@ use sqlparser::ast::{Expr, Function, FunctionArg, FunctionArgExpr, FunctionArgum
 use crate::{
     Error, Simulator,
     column::Column,
-    expr::{ColumnInferrer, InferContext},
+    expr::{ColumnInferrer, InferContext, InferredColumn, Scope},
     resolve::ResolvedQuery,
     ty::SqlType,
 };
@@ -15,7 +15,7 @@ impl Simulator {
         context: InferContext,
         inferrer: &I,
         resolved: &mut ResolvedQuery,
-    ) -> Result<Column, Error> {
+    ) -> Result<InferredColumn, Error> {
         let func_name = func.name.0.first().unwrap().to_string().to_lowercase();
 
         match func_name.as_str() {
@@ -31,7 +31,7 @@ impl Simulator {
         _: InferContext,
         inferrer: &I,
         _: &mut ResolvedQuery,
-    ) -> Result<Column, Error> {
+    ) -> Result<InferredColumn, Error> {
         let count_column = Column::new(SqlType::Integer, false, false);
 
         match args {
@@ -72,7 +72,10 @@ impl Simulator {
                     _ => todo!(),
                 }
 
-                Ok(count_column)
+                Ok(InferredColumn {
+                    column: count_column,
+                    scope: Scope::Group,
+                })
             }
             _ => todo!(),
         }
@@ -84,11 +87,12 @@ impl Simulator {
         context: InferContext,
         inferrer: &I,
         resolved: &mut ResolvedQuery,
-    ) -> Result<Column, Error> {
+    ) -> Result<InferredColumn, Error> {
         match args {
             FunctionArguments::List(list) => {
                 let mut ty: Option<SqlType> = None;
                 let mut nullable = true;
+                let mut scope = Scope::Literal;
 
                 for arg in &list.args {
                     match arg {
@@ -104,24 +108,27 @@ impl Simulator {
                                     })
                                     .unwrap_or_else(|| context.clone());
 
-                                let col = self.infer_expr_column(expr, ctx, inferrer, resolved)?;
+                                let infer =
+                                    self.infer_expr_column(expr, ctx, inferrer, resolved)?;
 
                                 // Nullable only if all columns are nullable,
                                 // otherwise coalesce collapses to not null.
-                                if !col.nullable {
+                                if !infer.column.nullable {
                                     nullable = false;
                                 }
 
+                                scope = scope.combine(&infer.scope)?;
+
                                 match ty {
                                     Some(ref ty) => {
-                                        if &col.ty != ty {
+                                        if &infer.column.ty != ty {
                                             return Err(Error::TypeMismatch {
                                                 expected: ty.clone(),
-                                                got: col.ty,
+                                                got: infer.column.ty,
                                             });
                                         }
                                     }
-                                    None => ty = Some(col.ty),
+                                    None => ty = Some(infer.column.ty),
                                 }
                             }
                             FunctionArgExpr::QualifiedWildcard(_) => {
@@ -140,7 +147,10 @@ impl Simulator {
                 }
 
                 if let Some(ty) = ty.as_ref() {
-                    Ok(Column::new(ty.clone(), nullable, false))
+                    Ok(InferredColumn {
+                        column: Column::new(ty.clone(), nullable, false),
+                        scope,
+                    })
                 } else {
                     Err(Error::FunctionCall(
                         "Missing arguments for Coalesce".to_string(),

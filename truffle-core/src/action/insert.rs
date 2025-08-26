@@ -135,7 +135,7 @@ impl Simulator {
                         }
                     },
                     SelectItem::ExprWithAlias { expr, alias } => {
-                        let col = self.infer_expr_column(
+                        let infer = self.infer_expr_column(
                             &expr,
                             InferContext::default(),
                             &inferrer,
@@ -153,7 +153,7 @@ impl Simulator {
                             name,
                         };
 
-                        resolved.insert_output(key, col);
+                        resolved.insert_output(key, infer.column);
                     }
                     SelectItem::QualifiedWildcard(kind, _) => match kind {
                         SelectItemQualifiedWildcardKind::ObjectName(name) => {

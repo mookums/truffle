@@ -74,10 +74,8 @@ pub enum Error {
     FunctionArgumentCount { expected: usize, got: usize },
     #[error("Function called wrong, '${0}'")]
     FunctionCall(String),
-    #[error("Column '{0}' is grouped but wanted ungrouped")]
-    GroupedColumn(String),
-    #[error("Column '{0}' is ungrouped but wanted grouped")]
-    UngroupedColumn(String),
+    #[error("Incompatible Expression Scopes")]
+    IncompatibleScope,
     #[error("'{0}' is currently unsupported")]
     Unsupported(String),
 }

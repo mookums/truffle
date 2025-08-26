@@ -123,7 +123,7 @@ fn criterion_benchmark(c: &mut Criterion) {
     c.bench_function("complex select with aggregation", |b| {
         b.iter(|| {
             sim.execute(black_box(
-                "select p.name, count(e.company_id)
+                "select count(e.company_id)
                  from person p 
                  left join employment e on p.id = e.person_id 
                  where p.age between 25 and 55",
