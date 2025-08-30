@@ -151,10 +151,10 @@ impl From<DataType> for SqlType {
             DataType::Int2(_) | DataType::SmallInt(_) => SqlType::SmallInt,
             DataType::Int4(_) | DataType::Integer(_) | DataType::Int(_) => SqlType::Integer,
             DataType::Int8(_) | DataType::BigInt(_) => SqlType::BigInt,
-            DataType::Real | DataType::Float(Some(4)) | DataType::Float4 | DataType::Float(_) => {
-                SqlType::Float
-            }
+            DataType::Real | DataType::Float(None) | DataType::Float4 => SqlType::Float,
+            DataType::Float(Some(n)) if (0..=4).contains(&n) => SqlType::Float,
             DataType::Double(_) | DataType::Float8 => SqlType::Double,
+            DataType::Float(Some(n)) if (4..=8).contains(&n) => SqlType::Double,
             DataType::Text | DataType::String(_) => SqlType::Text,
             // TODO: Length validation.
             DataType::Character(_)
