@@ -98,15 +98,10 @@ impl Simulator {
                     match arg {
                         FunctionArg::Unnamed(expr) => match expr {
                             FunctionArgExpr::Expr(expr) => {
-                                let ctx = ty
-                                    .as_ref()
-                                    .map(|t| {
-                                        // placeholders and values to COALESCE can be null.
-                                        InferContext::default()
-                                            .with_type(t.clone())
-                                            .with_nullable(true)
-                                    })
-                                    .unwrap_or_else(|| context.clone());
+                                let mut ctx = context.clone();
+                                ctx.constraints.ty = ty.clone();
+                                ctx.constraints.nullable = Some(nullable);
+                                ctx.constraints.scope = Some(scope);
 
                                 let infer =
                                     self.infer_expr_column(expr, ctx, inferrer, resolved)?;

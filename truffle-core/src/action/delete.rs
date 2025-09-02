@@ -1,7 +1,10 @@
 use sqlparser::ast::{Delete, FromTable, TableFactor};
 
 use crate::{
-    Error, Simulator, expr::InferContext, object_name_to_strings, resolve::ResolvedQuery,
+    Error, Simulator,
+    expr::{InferConstraints, InferContext},
+    object_name_to_strings,
+    resolve::ResolvedQuery,
     ty::SqlType,
 };
 
@@ -60,7 +63,13 @@ impl Simulator {
         if let Some(selection) = delete.selection {
             let infer = self.infer_expr_column(
                 &selection,
-                InferContext::default().with_type(SqlType::Boolean),
+                InferContext {
+                    constraints: InferConstraints {
+                        ty: Some(SqlType::Boolean),
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                },
                 &inferrer,
                 &mut resolved,
             )?;

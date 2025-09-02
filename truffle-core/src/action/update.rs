@@ -6,7 +6,7 @@ use sqlparser::ast::{
 use crate::{
     Error, Simulator,
     action::join::JoinInferrer,
-    expr::{ColumnInferrer, InferContext},
+    expr::{ColumnInferrer, InferConstraints, InferContext},
     object_name_to_strings,
     resolve::ResolvedQuery,
     ty::SqlType,
@@ -110,9 +110,14 @@ impl Simulator {
 
                     self.infer_expr_column(
                         &assignment.value,
-                        InferContext::default()
-                            .with_type(update_column.ty)
-                            .with_nullable(update_column.nullable),
+                        InferContext {
+                            constraints: InferConstraints {
+                                ty: Some(update_column.ty),
+                                nullable: Some(update_column.nullable),
+                                ..Default::default()
+                            },
+                            ..Default::default()
+                        },
                         &inferrer,
                         &mut resolved,
                     )?;
@@ -122,6 +127,8 @@ impl Simulator {
                         .into_iter()
                         .map(|on| object_name_to_strings(&on)[0].clone())
                         .collect();
+
+                    _ = names;
 
                     todo!()
                 }
@@ -134,7 +141,13 @@ impl Simulator {
         if let Some(selection) = selection {
             self.infer_expr_column(
                 &selection,
-                InferContext::default().with_type(SqlType::Boolean),
+                InferContext {
+                    constraints: InferConstraints {
+                        ty: Some(SqlType::Boolean),
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                },
                 &inferrer,
                 &mut resolved,
             )?;

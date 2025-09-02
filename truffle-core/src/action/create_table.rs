@@ -4,7 +4,7 @@ use tracing::debug;
 use crate::{
     Error, Simulator,
     column::Column,
-    expr::{ColumnInferrer, InferContext},
+    expr::{ColumnInferrer, InferConstraints, InferContext},
     object_name_to_strings,
     resolve::ResolvedQuery,
     table::{Constraint, Table},
@@ -45,7 +45,13 @@ impl Simulator {
                         let inferrer = CreateTableInferrer::default();
                         self.infer_expr_column(
                             &expr,
-                            InferContext::default().with_type(ty.clone()),
+                            InferContext {
+                                constraints: InferConstraints {
+                                    ty: Some(ty.clone()),
+                                    ..Default::default()
+                                },
+                                ..Default::default()
+                            },
                             &inferrer,
                             &mut resolved,
                         )?;

@@ -8,7 +8,7 @@ use sqlparser::ast::{
 use crate::{
     Error, Simulator,
     action::join::JoinInferrer,
-    expr::{InferContext, Scope},
+    expr::{InferConstraints, InferContext, Scope},
     object_name_to_strings,
     resolve::{ColumnRef, ResolvedQuery},
     ty::SqlType,
@@ -66,9 +66,14 @@ impl Simulator {
         if let Some(selection) = &sel.selection {
             self.infer_expr_column(
                 selection,
-                InferContext::default()
-                    .with_type(SqlType::Boolean)
-                    .with_scope(Scope::Row),
+                InferContext {
+                    constraints: InferConstraints {
+                        ty: Some(SqlType::Boolean),
+                        scope: Some(Scope::Row),
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                },
                 &inferrer,
                 &mut resolved,
             )?;
@@ -82,7 +87,13 @@ impl Simulator {
                 for expr in exprs {
                     let infer = self.infer_expr_column(
                         expr,
-                        InferContext::default().with_scope(Scope::Row),
+                        InferContext {
+                            constraints: InferConstraints {
+                                scope: Some(Scope::Row),
+                                ..Default::default()
+                            },
+                            ..Default::default()
+                        },
                         &inferrer,
                         &mut resolved,
                     )?;
@@ -110,10 +121,15 @@ impl Simulator {
         if let Some(having) = &sel.having {
             self.infer_expr_column(
                 having,
-                InferContext::default()
-                    .with_type(SqlType::Boolean)
-                    .with_scope(Scope::Group)
-                    .with_grouped(&grouped_exprs),
+                InferContext {
+                    constraints: InferConstraints {
+                        ty: Some(SqlType::Boolean),
+                        scope: Some(Scope::Group),
+                        ..Default::default()
+                    },
+                    grouped: &grouped_exprs,
+                    ..Default::default()
+                },
                 &inferrer,
                 &mut resolved,
             )?;
@@ -125,9 +141,14 @@ impl Simulator {
                     // If we are grouped and this expression isn't, return an Error.
                     let infer = self.infer_expr_column(
                         expr,
-                        InferContext::default()
-                            .with_scope(scope)
-                            .with_grouped(&grouped_exprs),
+                        InferContext {
+                            constraints: InferConstraints {
+                                scope: Some(scope),
+                                ..Default::default()
+                            },
+                            grouped: &grouped_exprs,
+                            ..Default::default()
+                        },
                         &inferrer,
                         &mut resolved,
                     )?;
@@ -143,9 +164,14 @@ impl Simulator {
                 SelectItem::ExprWithAlias { expr, alias } => {
                     let infer = self.infer_expr_column(
                         expr,
-                        InferContext::default()
-                            .with_scope(scope)
-                            .with_grouped(&grouped_exprs),
+                        InferContext {
+                            constraints: InferConstraints {
+                                scope: Some(scope),
+                                ..Default::default()
+                            },
+                            grouped: &grouped_exprs,
+                            ..Default::default()
+                        },
                         &inferrer,
                         &mut resolved,
                     )?;

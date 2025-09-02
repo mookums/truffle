@@ -9,7 +9,7 @@ use sqlparser::ast::{Join, JoinConstraint, JoinOperator, TableFactor};
 use crate::{
     Error, Simulator,
     column::Column,
-    expr::{ColumnInferrer, InferContext},
+    expr::{ColumnInferrer, InferConstraints, InferContext},
     object_name_to_strings,
     resolve::ResolvedQuery,
     table::Table,
@@ -128,7 +128,13 @@ impl Simulator {
 
                 let infer = self.infer_expr_column(
                     expr,
-                    InferContext::default().with_type(SqlType::Boolean),
+                    InferContext {
+                        constraints: InferConstraints {
+                            ty: Some(SqlType::Boolean),
+                            ..Default::default()
+                        },
+                        ..Default::default()
+                    },
                     &inferrer,
                     resolved,
                 )?;
@@ -659,10 +665,10 @@ impl<'a> ColumnInferrer for JoinContextInferrer<'a> {
                 if let Some(col) = self.right_table.2.get_column(column) {
                     return Ok(col.clone());
                 }
-            } else if qualifier == self.right_table.0 {
-                if let Some(col) = self.right_table.2.get_column(column) {
-                    return Ok(col.clone());
-                }
+            } else if qualifier == self.right_table.0
+                && let Some(col) = self.right_table.2.get_column(column)
+            {
+                return Ok(col.clone());
             }
 
             Err(Error::QualifiedColumnDoesntExist {

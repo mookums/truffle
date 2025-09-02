@@ -1751,6 +1751,11 @@ fn select_with_having_complex_nested_valid() {
     .unwrap();
 
     let resolve = sim
+        .execute("select age + 1, salary * 2 from person group by age + 1, salary * 2 having (age + 1) > 25")
+        .unwrap();
+    assert_eq!(resolve.outputs.len(), 2);
+
+    let resolve = sim
         .execute("select age + 1, salary * 2 from person group by age + 1, salary * 2 having (age + 1) > 25 AND (salary * 2) > 1000 AND COUNT(id) > 3")
         .unwrap();
     assert_eq!(resolve.outputs.len(), 2);

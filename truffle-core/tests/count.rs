@@ -49,21 +49,21 @@ fn select_with_count_wildcard_function() {
     );
 }
 
-// #[test]
-// fn select_with_count_function_aliased() {
-//     let mut sim = Simulator::default();
-//     sim.execute("create table item (id int primary key, name text not null default 'abc', age int default 0)").unwrap();
+#[test]
+fn select_with_count_function_aliased() {
+    let mut sim = Simulator::default();
+    sim.execute("create table item (id int primary key, name text not null default 'abc', age int default 0)").unwrap();
 
-//     let resolve = sim
-//         .execute("select COUNT(id) as item_count from item where id = $1")
-//         .unwrap();
+    let resolve = sim
+        .execute("select COUNT(id) as item_count from item where id = $1")
+        .unwrap();
 
-//     assert_eq!(resolve.inputs.len(), 1);
-//     assert_eq!(resolve.get_input(0).unwrap().ty, SqlType::Integer);
+    assert_eq!(resolve.inputs.len(), 1);
+    assert_eq!(resolve.get_input(0).unwrap().ty, SqlType::Integer);
 
-//     assert_eq!(resolve.outputs.len(), 1);
-//     assert_eq!(
-//         resolve.get_output_with_name("item_count").unwrap().ty,
-//         SqlType::Integer
-//     );
-// }
+    assert_eq!(resolve.outputs.len(), 1);
+    assert_eq!(
+        resolve.get_output_with_name("item_count").unwrap().ty,
+        SqlType::Integer
+    );
+}

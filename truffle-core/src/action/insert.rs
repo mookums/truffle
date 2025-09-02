@@ -5,7 +5,7 @@ use sqlparser::ast::{
 use crate::{
     Error, Simulator,
     column::Column,
-    expr::{ColumnInferrer, InferContext},
+    expr::{ColumnInferrer, InferConstraints, InferContext},
     object_name_to_strings,
     resolve::{ColumnRef, ResolvedQuery},
     table::Table,
@@ -69,9 +69,14 @@ impl Simulator {
 
                             _ = self.infer_expr_column(
                                 expr,
-                                InferContext::default()
-                                    .with_type(column.ty.clone())
-                                    .with_nullable(column.nullable),
+                                InferContext {
+                                    constraints: InferConstraints {
+                                        ty: Some(column.ty.clone()),
+                                        nullable: Some(column.nullable),
+                                        ..Default::default()
+                                    },
+                                    ..Default::default()
+                                },
                                 &inferrer,
                                 &mut resolved,
                             )?;
@@ -83,9 +88,14 @@ impl Simulator {
 
                             _ = self.infer_expr_column(
                                 expr,
-                                InferContext::default()
-                                    .with_type(column.ty.clone())
-                                    .with_nullable(column.nullable),
+                                InferContext {
+                                    constraints: InferConstraints {
+                                        ty: Some(column.ty.clone()),
+                                        nullable: Some(column.nullable),
+                                        ..Default::default()
+                                    },
+                                    ..Default::default()
+                                },
                                 &inferrer,
                                 &mut resolved,
                             )?;
