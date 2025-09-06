@@ -22,6 +22,7 @@ impl Simulator {
             "count" => self.sql_count(&func.args, context, inferrer, resolved),
             "coalesce" => self.sql_coalesce(&func.args, context, inferrer, resolved),
             "avg" => self.sql_avg(&func.args, context, inferrer, resolved),
+            "min" | "max" => self.sql_min_max(&func.args, context, inferrer, resolved),
             _ => Err(Error::FunctionDoesntExist(func_name)),
         }
     }
@@ -201,6 +202,67 @@ impl Simulator {
                     },
                     _ => todo!(),
                 };
+
+                // Must be numeric.
+                if !column.ty.is_numeric() {
+                    return Err(Error::TypeNotNumeric(column.ty));
+                }
+
+                Ok(InferredColumn {
+                    column,
+                    scope: Scope::Group,
+                })
+            }
+            _ => todo!(),
+        }
+    }
+
+    fn sql_min_max<I: ColumnInferrer>(
+        &self,
+        args: &FunctionArguments,
+        _: InferContext,
+        inferrer: &I,
+        _: &mut ResolvedQuery,
+    ) -> Result<InferredColumn, Error> {
+        match args {
+            FunctionArguments::List(list) => {
+                // MIN/MAX can only take in one argument.
+                if list.args.len() != 1 {
+                    return Err(Error::FunctionArgumentCount {
+                        expected: 1,
+                        got: list.args.len(),
+                    });
+                }
+
+                let arg = list.args.first().unwrap();
+                let column = match arg {
+                    FunctionArg::Unnamed(arg_expr) => match arg_expr {
+                        FunctionArgExpr::Expr(expr) => match expr {
+                            Expr::Identifier(ident) => {
+                                let column_name = ident.value.clone();
+
+                                inferrer
+                                    .infer_unqualified_column(self, &column_name)?
+                                    .ok_or_else(|| Error::ColumnDoesntExist(column_name.clone()))?
+                            }
+                            Expr::CompoundIdentifier(idents) => {
+                                let qualifier = &idents.first().unwrap().value;
+                                let column_name = &idents.get(1).unwrap().value;
+
+                                inferrer.infer_qualified_column(self, qualifier, column_name)?
+                            }
+                            _ => todo!(),
+                        },
+                        _ => {
+                            return Err(Error::FunctionCall(
+                                "MIN/MAX can't operate on wildcards".to_string(),
+                            ));
+                        }
+                    },
+                    _ => todo!(),
+                };
+
+                // TODO: Must be a comparable type
 
                 Ok(InferredColumn {
                     column,
