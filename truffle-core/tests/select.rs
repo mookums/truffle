@@ -1800,3 +1800,37 @@ fn select_with_having_multiple_nested_levels() {
         .unwrap();
     assert_eq!(resolve.outputs.len(), 1);
 }
+
+#[test]
+fn select_with_order_by_valid() {
+    let mut sim = Simulator::default();
+    sim.execute("create table person (id int primary key, name text not null, age int, salary int, bonus int)")
+        .unwrap();
+
+    let resolve = sim.execute("select id from person order by age").unwrap();
+    assert_eq!(resolve.outputs.len(), 1);
+}
+
+#[test]
+fn select_with_order_by_incompatible_scope() {
+    let mut sim = Simulator::default();
+    sim.execute("create table person (id int primary key, name text not null, age int, salary int, bonus int)")
+        .unwrap();
+
+    assert_eq!(
+        sim.execute("select COUNT(id) from person group by salary order by age"),
+        Err(Error::IncompatibleScope)
+    );
+}
+
+#[test]
+fn select_with_order_by_aggregate_function() {
+    let mut sim = Simulator::default();
+    sim.execute("create table person (id int primary key, name text not null, age int, salary int, bonus int)")
+        .unwrap();
+
+    let resolve = sim
+        .execute("select COUNT(id) from person group by salary order by COUNT(bonus)")
+        .unwrap();
+    assert_eq!(resolve.outputs.len(), 1);
+}

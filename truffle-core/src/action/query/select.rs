@@ -2,7 +2,7 @@ use std::{collections::HashSet, rc::Rc};
 
 use itertools::Itertools;
 use sqlparser::ast::{
-    GroupByExpr, Query, SelectItem, SelectItemQualifiedWildcardKind, TableFactor,
+    GroupByExpr, OrderByKind, Query, SelectItem, SelectItemQualifiedWildcardKind, TableFactor,
 };
 
 use crate::{
@@ -259,24 +259,31 @@ impl Simulator {
         }
 
         // Validate Order By
-        // if let Some(order_by) = &query.order_by {
-        //     match &order_by.kind {
-        //         OrderByKind::Expressions(order_by_exprs) => {
-        //             for order_by_expr in order_by_exprs {
-        //                 let col = self.infer_expr_column(
-        //                     &order_by_expr.expr,
-        //                     InferContext::default().with_scope(Scope::Row),
-        //                     &inferrer,
-        //                     &mut resolved,
-        //                 )?;
+        if let Some(order_by) = &query.order_by {
+            match &order_by.kind {
+                OrderByKind::Expressions(order_by_exprs) => {
+                    for order_by_expr in order_by_exprs {
+                        let col = self.infer_expr_column(
+                            &order_by_expr.expr,
+                            InferContext {
+                                constraints: InferConstraints {
+                                    scope: Some(scope),
+                                    ..Default::default()
+                                },
+                                grouped: &grouped_exprs,
+                                ..Default::default()
+                            },
+                            &inferrer,
+                            &mut resolved,
+                        )?;
 
-        //                 // TODO: Ensure type is "comparable".
-        //                 _ = col;
-        //             }
-        //         }
-        //         _ => todo!("Unsupported OrderByKind"),
-        //     }
-        // }
+                        // TODO: Ensure type is "comparable".
+                        _ = col;
+                    }
+                }
+                _ => todo!("Unsupported OrderByKind"),
+            }
+        }
 
         Ok(resolved)
     }
