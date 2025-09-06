@@ -21,6 +21,7 @@ impl Simulator {
         match func_name.as_str() {
             "count" => self.sql_count(&func.args, context, inferrer, resolved),
             "coalesce" => self.sql_coalesce(&func.args, context, inferrer, resolved),
+            "avg" => self.sql_avg(&func.args, context, inferrer, resolved),
             _ => Err(Error::FunctionDoesntExist(func_name)),
         }
     }
@@ -151,6 +152,60 @@ impl Simulator {
                         "Missing arguments for Coalesce".to_string(),
                     ))
                 }
+            }
+            _ => todo!(),
+        }
+    }
+
+    fn sql_avg<I: ColumnInferrer>(
+        &self,
+        args: &FunctionArguments,
+        _: InferContext,
+        inferrer: &I,
+        _: &mut ResolvedQuery,
+    ) -> Result<InferredColumn, Error> {
+        match args {
+            FunctionArguments::List(list) => {
+                // AVG can only take in one argument.
+                if list.args.len() != 1 {
+                    return Err(Error::FunctionArgumentCount {
+                        expected: 1,
+                        got: list.args.len(),
+                    });
+                }
+
+                let arg = list.args.first().unwrap();
+                let column = match arg {
+                    FunctionArg::Unnamed(arg_expr) => match arg_expr {
+                        FunctionArgExpr::Expr(expr) => match expr {
+                            Expr::Identifier(ident) => {
+                                let column_name = ident.value.clone();
+
+                                inferrer
+                                    .infer_unqualified_column(self, &column_name)?
+                                    .ok_or_else(|| Error::ColumnDoesntExist(column_name.clone()))?
+                            }
+                            Expr::CompoundIdentifier(idents) => {
+                                let qualifier = &idents.first().unwrap().value;
+                                let column_name = &idents.get(1).unwrap().value;
+
+                                inferrer.infer_qualified_column(self, qualifier, column_name)?
+                            }
+                            _ => todo!(),
+                        },
+                        _ => {
+                            return Err(Error::FunctionCall(
+                                "AVG can't operate on wildcards".to_string(),
+                            ));
+                        }
+                    },
+                    _ => todo!(),
+                };
+
+                Ok(InferredColumn {
+                    column,
+                    scope: Scope::Group,
+                })
             }
             _ => todo!(),
         }

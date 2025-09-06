@@ -1761,19 +1761,19 @@ fn select_with_having_complex_nested_valid() {
     assert_eq!(resolve.outputs.len(), 2);
 }
 
-// #[test]
-// fn select_with_having_nested_aggregates() {
-//     let mut sim = Simulator::default();
-//     sim.execute(
-//         "create table person (id int primary key, name text not null, age int, salary int)",
-//     )
-//     .unwrap();
+#[test]
+fn select_with_having_nested_aggregates() {
+    let mut sim = Simulator::default();
+    sim.execute(
+        "create table person (id int primary key, name text not null, age int, salary int)",
+    )
+    .unwrap();
 
-//     let resolve = sim
-//         .execute("select age from person group by age having COUNT(id) > AVG(salary) / 100")
-//         .unwrap();
-//     assert_eq!(resolve.outputs.len(), 1);
-// }
+    let resolve = sim
+        .execute("select age from person group by age having COUNT(id) > AVG(salary) / 100")
+        .unwrap();
+    assert_eq!(resolve.outputs.len(), 1);
+}
 
 #[test]
 fn select_with_having_subexpression_of_grouped() {
