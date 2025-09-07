@@ -569,11 +569,8 @@ impl JoinContext {
             1 => matches.first().map(|m| Column::clone(m.1)),
             _ => {
                 // Should be impossible for us to have multiple logical columns for a qualified match.
-                if matches.iter().map(|(_, idx)| idx).all_equal() {
-                    matches.first().map(|m| Column::clone(m.1))
-                } else {
-                    unreachable!()
-                }
+                assert!(matches.iter().map(|(_, idx)| idx).all_equal());
+                matches.first().map(|m| Column::clone(m.1))
             }
         };
 
