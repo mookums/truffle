@@ -76,6 +76,8 @@ pub enum Error {
     FunctionCall(String),
     #[error("Incompatible Expression Scopes")]
     IncompatibleScope,
+    #[error("Subquery returns no columns")]
+    SubqueryNoColumns,
     #[error("'{0}' is currently unsupported")]
     Unsupported(String),
 }

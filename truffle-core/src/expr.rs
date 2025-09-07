@@ -376,13 +376,35 @@ impl Simulator {
                 }
             },
             Expr::Function(func) => self.infer_function_column(func, ctx, inferrer, resolved)?,
-            Expr::Subquery(_) => {
-                // Need to basically seperate out the `self.query()` so it can take some additional parameters
-                // like the infer and the resolved.
+            Expr::Subquery(query) => {
+                // TODO: Need to be able to take in current inferrer
+                // and use that to resolve columns.
                 //
-                // this allows us to have a subquery and query that share the same bones.
-                todo!()
+                // This is becuase the subquery CAN use aliases from the parent scope.
+                let resolved_query = self.query(query)?;
+
+                // Add inputs
+                for input in resolved_query.inputs {
+                    resolved.insert_input("?", input);
+                }
+
+                // Map outputs
+                let column = match resolved_query.outputs.len() {
+                    0 => return Err(Error::SubqueryNoColumns),
+                    1 => resolved_query.outputs.get_index(0).unwrap().1.clone(),
+                    _ => {
+                        let columns: Vec<_> =
+                            resolved_query.outputs.clone().into_values().collect();
+                        Column::new(SqlType::Tuple(columns), false, false)
+                    }
+                };
+
+                InferredColumn {
+                    column,
+                    scope: ctx.constraints.scope.unwrap_or(Scope::Literal),
+                }
             }
+            // TODO: Expr::InSubquery()
             Expr::Between {
                 expr, low, high, ..
             } => {
@@ -739,6 +761,9 @@ impl Simulator {
     ) -> Result<InferredColumn, Error> {
         let mut ctx = context;
         let [left, right] = exprs;
+
+        // TODO: Left and Right don't need to be the SAME type but
+        // they need to be compatible.
 
         match op {
             BinaryOperator::Plus
