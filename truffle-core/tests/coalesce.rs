@@ -107,3 +107,23 @@ fn select_with_coalesce_not_nullable_with_column() {
     assert_eq!(output.ty, SqlType::Integer);
     assert!(!output.nullable);
 }
+
+#[test]
+fn select_with_coalesce_placeholder_first() {
+    let mut sim = Simulator::default();
+    sim.execute("create table item (id int primary key, name text not null default 'abc', age int default 0, birth_age int not null)").unwrap();
+
+    let resolve = sim
+        .execute("select COALESCE($1, birth_age) from item where id = $2")
+        .unwrap();
+
+    assert_eq!(resolve.inputs.len(), 2);
+    assert_eq!(resolve.get_input(0).unwrap().ty, SqlType::Integer);
+    assert_eq!(resolve.get_input(1).unwrap().ty, SqlType::Integer);
+
+    assert_eq!(resolve.outputs.len(), 1);
+
+    let output = resolve.outputs.get_index(0).unwrap().1;
+    assert_eq!(output.ty, SqlType::Integer);
+    assert!(!output.nullable);
+}

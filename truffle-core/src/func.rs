@@ -90,186 +90,155 @@ impl Simulator {
         inferrer: &I,
         resolved: &mut ResolvedQuery,
     ) -> Result<InferredColumn, Error> {
-        match args {
-            FunctionArguments::List(list) => {
-                let mut ty: Option<SqlType> = None;
-                let mut nullable = true;
-                let mut scope = Scope::Literal;
+        let FunctionArguments::List(list) = args else {
+            return Err(Error::FunctionCall(
+                "Invalid arguments for COALESCE".to_string(),
+            ));
+        };
 
-                for arg in &list.args {
-                    match arg {
-                        FunctionArg::Unnamed(expr) => match expr {
-                            FunctionArgExpr::Expr(expr) => {
-                                let mut ctx = context.clone();
-                                ctx.constraints.ty = ty.clone();
-                                ctx.constraints.nullable = Some(nullable);
-                                ctx.constraints.scope = Some(scope);
+        let mut ty: Option<SqlType> = None;
 
-                                let infer =
-                                    self.infer_expr_column(expr, ctx, inferrer, resolved)?;
+        // First type pass, this gets the type to use.
+        for arg in &list.args {
+            let FunctionArg::Unnamed(FunctionArgExpr::Expr(expr)) = arg else {
+                return Err(Error::FunctionCall(
+                    "COALESCE operates on individual columns/values.".to_string(),
+                ));
+            };
 
-                                // Nullable only if all columns are nullable,
-                                // otherwise coalesce collapses to not null.
-                                if !infer.column.nullable {
-                                    nullable = false;
-                                }
+            let mut first_ctx = context.clone();
+            first_ctx.constraints.ty = ty.clone();
 
-                                scope = scope.combine(&infer.scope)?;
-
-                                match ty {
-                                    Some(ref ty) => {
-                                        if &infer.column.ty != ty {
-                                            return Err(Error::TypeMismatch {
-                                                expected: ty.clone(),
-                                                got: infer.column.ty,
-                                            });
-                                        }
-                                    }
-                                    None => ty = Some(infer.column.ty),
-                                }
-                            }
-                            FunctionArgExpr::QualifiedWildcard(_) => {
-                                return Err(Error::FunctionCall(
-                                    "Coalesce operates on individual columns/values.".to_string(),
-                                ));
-                            }
-                            FunctionArgExpr::Wildcard => {
-                                return Err(Error::FunctionCall(
-                                    "Coalesce operates on individual columns/values.".to_string(),
-                                ));
-                            }
-                        },
-                        _ => todo!(),
+            if let Ok(infer) = self.infer_expr_column(expr, first_ctx, inferrer, resolved) {
+                match ty {
+                    Some(ref ty) => {
+                        if &infer.column.ty != ty {
+                            return Err(Error::TypeMismatch {
+                                expected: ty.clone(),
+                                got: infer.column.ty,
+                            });
+                        }
                     }
-                }
-
-                if let Some(ty) = ty.as_ref() {
-                    Ok(InferredColumn {
-                        column: Column::new(ty.clone(), nullable, false),
-                        scope,
-                    })
-                } else {
-                    Err(Error::FunctionCall(
-                        "Missing arguments for Coalesce".to_string(),
-                    ))
+                    None => ty = Some(infer.column.ty),
                 }
             }
-            _ => todo!(),
+        }
+
+        let mut nullable = true;
+        let mut scope = Scope::Literal;
+
+        let mut ctx = context.clone();
+        ctx.constraints.ty = ty.clone();
+
+        for arg in &list.args {
+            let FunctionArg::Unnamed(FunctionArgExpr::Expr(expr)) = arg else {
+                unreachable!();
+            };
+
+            let mut ctx = context.clone();
+            ctx.constraints.ty = ty.clone();
+            ctx.constraints.nullable = Some(nullable);
+            ctx.constraints.scope = Some(scope);
+
+            let infer = self.infer_expr_column(expr, ctx, inferrer, resolved)?;
+
+            // Nullable only if all columns are nullable,
+            // otherwise coalesce collapses to not null.
+            nullable &= infer.column.nullable;
+            scope = scope.combine(&infer.scope)?;
+        }
+
+        if let Some(ty) = ty.as_ref() {
+            Ok(InferredColumn {
+                column: Column::new(ty.clone(), nullable, false),
+                scope,
+            })
+        } else {
+            Err(Error::FunctionCall(
+                "Missing arguments for Coalesce".to_string(),
+            ))
         }
     }
 
     fn sql_avg<I: ColumnInferrer>(
         &self,
         args: &FunctionArguments,
-        _: InferContext,
+        context: InferContext,
         inferrer: &I,
-        _: &mut ResolvedQuery,
+        resolved: &mut ResolvedQuery,
     ) -> Result<InferredColumn, Error> {
-        match args {
-            FunctionArguments::List(list) => {
-                // AVG can only take in one argument.
-                if list.args.len() != 1 {
-                    return Err(Error::FunctionArgumentCount {
-                        expected: 1,
-                        got: list.args.len(),
-                    });
-                }
+        let FunctionArguments::List(list) = args else {
+            return Err(Error::FunctionCall("Invalid arguments for AVG".to_string()));
+        };
 
-                let arg = list.args.first().unwrap();
-                let column = match arg {
-                    FunctionArg::Unnamed(arg_expr) => match arg_expr {
-                        FunctionArgExpr::Expr(expr) => match expr {
-                            Expr::Identifier(ident) => {
-                                let column_name = ident.value.clone();
-
-                                inferrer
-                                    .infer_unqualified_column(self, &column_name)?
-                                    .ok_or_else(|| Error::ColumnDoesntExist(column_name.clone()))?
-                            }
-                            Expr::CompoundIdentifier(idents) => {
-                                let qualifier = &idents.first().unwrap().value;
-                                let column_name = &idents.get(1).unwrap().value;
-
-                                inferrer.infer_qualified_column(self, qualifier, column_name)?
-                            }
-                            _ => todo!(),
-                        },
-                        _ => {
-                            return Err(Error::FunctionCall(
-                                "AVG can't operate on wildcards".to_string(),
-                            ));
-                        }
-                    },
-                    _ => todo!(),
-                };
-
-                // Must be numeric.
-                if !column.ty.is_numeric() {
-                    return Err(Error::TypeNotNumeric(column.ty));
-                }
-
-                Ok(InferredColumn {
-                    column,
-                    scope: Scope::Group,
-                })
-            }
-            _ => todo!(),
+        // AVG can only take in one argument.
+        if list.args.len() != 1 {
+            return Err(Error::FunctionArgumentCount {
+                expected: 1,
+                got: list.args.len(),
+            });
         }
+
+        let arg = list.args.first().unwrap();
+        let FunctionArg::Unnamed(FunctionArgExpr::Expr(expr)) = arg else {
+            return Err(Error::FunctionCall(
+                "AVG operates only on individual rows/values.".to_string(),
+            ));
+        };
+
+        let mut ctx = context.clone();
+        ctx.constraints.scope = Some(Scope::Row);
+
+        let infer = self.infer_expr_column(expr, ctx, inferrer, resolved)?;
+
+        // Must be numeric.
+        if !infer.column.ty.is_numeric() {
+            return Err(Error::TypeNotNumeric(infer.column.ty));
+        }
+
+        Ok(InferredColumn {
+            column: infer.column,
+            scope: Scope::Group,
+        })
     }
 
     fn sql_min_max<I: ColumnInferrer>(
         &self,
         args: &FunctionArguments,
-        _: InferContext,
+        context: InferContext,
         inferrer: &I,
-        _: &mut ResolvedQuery,
+        resolved: &mut ResolvedQuery,
     ) -> Result<InferredColumn, Error> {
-        match args {
-            FunctionArguments::List(list) => {
-                // MIN/MAX can only take in one argument.
-                if list.args.len() != 1 {
-                    return Err(Error::FunctionArgumentCount {
-                        expected: 1,
-                        got: list.args.len(),
-                    });
-                }
+        let FunctionArguments::List(list) = args else {
+            return Err(Error::FunctionCall(
+                "Invalid arguments for MIN/MAX".to_string(),
+            ));
+        };
 
-                let arg = list.args.first().unwrap();
-                let column = match arg {
-                    FunctionArg::Unnamed(arg_expr) => match arg_expr {
-                        FunctionArgExpr::Expr(expr) => match expr {
-                            Expr::Identifier(ident) => {
-                                let column_name = ident.value.clone();
-
-                                inferrer
-                                    .infer_unqualified_column(self, &column_name)?
-                                    .ok_or_else(|| Error::ColumnDoesntExist(column_name.clone()))?
-                            }
-                            Expr::CompoundIdentifier(idents) => {
-                                let qualifier = &idents.first().unwrap().value;
-                                let column_name = &idents.get(1).unwrap().value;
-
-                                inferrer.infer_qualified_column(self, qualifier, column_name)?
-                            }
-                            _ => todo!(),
-                        },
-                        _ => {
-                            return Err(Error::FunctionCall(
-                                "MIN/MAX can't operate on wildcards".to_string(),
-                            ));
-                        }
-                    },
-                    _ => todo!(),
-                };
-
-                // TODO: Must be a comparable type
-
-                Ok(InferredColumn {
-                    column,
-                    scope: Scope::Group,
-                })
-            }
-            _ => todo!(),
+        // MIN/MAX can only take in one argument.
+        if list.args.len() != 1 {
+            return Err(Error::FunctionArgumentCount {
+                expected: 1,
+                got: list.args.len(),
+            });
         }
+
+        let arg = list.args.first().unwrap();
+
+        let FunctionArg::Unnamed(FunctionArgExpr::Expr(expr)) = arg else {
+            return Err(Error::FunctionCall(
+                "MIN/MAX operates only on individual rows/values.".to_string(),
+            ));
+        };
+
+        let mut ctx = context.clone();
+        ctx.constraints.scope = Some(Scope::Row);
+
+        let infer = self.infer_expr_column(expr, ctx, inferrer, resolved)?;
+
+        Ok(InferredColumn {
+            column: infer.column,
+            scope: Scope::Group,
+        })
     }
 }
