@@ -156,7 +156,7 @@ impl Simulator {
                     scope = scope.combine(&infer.scope)?;
 
                     let key = Self::infer_expr_name(expr)?.unwrap_or_else(|| {
-                        ColumnRef::new(None, resolved.outputs.len().to_string())
+                        ColumnRef::new(None, format!("unnamed_{}", resolved.outputs.len()))
                     });
 
                     resolved.insert_output(key, infer.column);
