@@ -10,7 +10,7 @@ Truffle is a comprehensive SQL static analyzer designed to catch errors, validat
 
 We check a variety of things, including but not limited to: SQL syntax, column resolution, alias conflicting, scoping (row vs group), type checking, etc.
 
-Truffle is available as a Rust library (`truffle`), a CLI (`truffle-cli`), through C FFI (planned), and as an `sqlx` wrapper.
+Truffle is available as a Rust library (`truffle`), a CLI (`truffle-cli`), through C FFI (planned), and as an `sqlx` wrapper. You can also try out a WASM demo on my website [here](https://muki.gg/demo/truffle).
 
 ## Installation & Usage
 ### Rust Crate 
@@ -26,7 +26,7 @@ truffle = { git = "https://github.com/mookums/truffle", features = [ "all" ] }
 
 You can now use Truffle within your project, like the example below.
 ```rust
-use truffle::{Error, Simulator, ty::SqlType};
+use truffle::Simulator;
 
 fn main() {
     let mut sim = Simulator::default();
