@@ -6,26 +6,27 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    permissions:
+      id-token: "write"
+      contents: "read"
     steps:
       - name: Checkout
         uses: actions/checkout@v4
       
       - name: Install Nix
-        uses: cachix/install-nix-action@v27
+        uses: DeterminateSystems/nix-installer-action@main
+        
+      - name: Setup Magic Nix Cache
+        uses: DeterminateSystems/magic-nix-cache-action@main
+        
+      - name: Check Flake
+        uses: DeterminateSystems/flake-checker-action@main
+        
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
         with:
-          github_access_token: ${{ secrets.GITHUB_TOKEN }}
-          
-      - name: Restore and save Nix store
-        uses: nix-community/cache-nix-action@v6
-        with:
-          primary-key: nix-${{ runner.os }}-${{ hashFiles('**/*.nix', '**/flake.lock') }}
-          restore-prefixes-first-match: nix-${{ runner.os }}-
-          gc-max-store-size-linux: 2G
-          purge: true
-          purge-prefixes: nix-${{ runner.os }}-
-          purge-created: 604800 # 7 days
-          purge-last-accessed: 86400 # 24 hours
-          purge-primary-key: never
+          workspaces: "."
+          cache-on-failure: true
      
       - name: Test in Nix Environment
         run: nix develop --command bash -c 'cargo test'
