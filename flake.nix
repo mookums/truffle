@@ -34,6 +34,7 @@
             rustToolchain
             cargo-hakari
             cargo-expand
+            cargo-nextest
           ];
         };
       }
