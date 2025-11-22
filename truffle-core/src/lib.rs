@@ -5,6 +5,7 @@ mod expr;
 mod func;
 mod misc;
 pub mod resolve;
+mod returning;
 mod table;
 pub mod ty;
 

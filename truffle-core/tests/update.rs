@@ -127,3 +127,256 @@ fn update_where_clause_type_mismatch() {
         })
     );
 }
+
+#[test]
+fn update_with_returning_wildcard() {
+    let mut sim = Simulator::default();
+    sim.execute("create table person (id int, name text, age int)")
+        .unwrap();
+    let resolve = sim
+        .execute("update person set name = ?, age = ? where id = ? returning *")
+        .unwrap();
+
+    assert_eq!(resolve.inputs.len(), 3);
+    assert_eq!(resolve.get_input(0).unwrap().ty, SqlType::Text);
+    assert_eq!(resolve.get_input(1).unwrap().ty, SqlType::Integer);
+    assert_eq!(resolve.get_input(2).unwrap().ty, SqlType::Integer);
+
+    assert_eq!(resolve.outputs.len(), 3);
+    assert_eq!(
+        resolve.get_output_with_name("id").unwrap().ty,
+        SqlType::Integer
+    );
+    assert_eq!(
+        resolve.get_output_with_name("name").unwrap().ty,
+        SqlType::Text
+    );
+    assert_eq!(
+        resolve.get_output_with_name("age").unwrap().ty,
+        SqlType::Integer
+    );
+}
+
+#[test]
+fn update_with_returning_single_column() {
+    let mut sim = Simulator::default();
+    sim.execute("create table person (id int, name text, age int)")
+        .unwrap();
+    let resolve = sim
+        .execute("update person set name = ? where id = ? returning id")
+        .unwrap();
+
+    assert_eq!(resolve.inputs.len(), 2);
+    assert_eq!(resolve.outputs.len(), 1);
+    assert_eq!(
+        resolve.get_output_with_name("id").unwrap().ty,
+        SqlType::Integer
+    );
+}
+
+#[test]
+fn update_with_returning_multiple_columns() {
+    let mut sim = Simulator::default();
+    sim.execute("create table person (id int, name text, age int)")
+        .unwrap();
+    let resolve = sim
+        .execute("update person set name = ?, age = ? returning id, name")
+        .unwrap();
+
+    assert_eq!(resolve.inputs.len(), 2);
+    assert_eq!(resolve.outputs.len(), 2);
+    assert_eq!(
+        resolve.get_output_with_name("id").unwrap().ty,
+        SqlType::Integer
+    );
+    assert_eq!(
+        resolve.get_output_with_name("name").unwrap().ty,
+        SqlType::Text
+    );
+}
+
+#[test]
+fn update_with_returning_qualified_wildcard() {
+    let mut sim = Simulator::default();
+    sim.execute("create table person (id int, name text, age int)")
+        .unwrap();
+    let resolve = sim
+        .execute("update person set name = ? returning person.*")
+        .unwrap();
+
+    assert_eq!(resolve.inputs.len(), 1);
+    assert_eq!(resolve.outputs.len(), 3);
+    assert_eq!(
+        resolve.get_output_with_name("id").unwrap().ty,
+        SqlType::Integer
+    );
+    assert_eq!(
+        resolve.get_output_with_name("name").unwrap().ty,
+        SqlType::Text
+    );
+    assert_eq!(
+        resolve.get_output_with_name("age").unwrap().ty,
+        SqlType::Integer
+    );
+}
+
+#[test]
+fn update_with_returning_qualified_column() {
+    let mut sim = Simulator::default();
+    sim.execute("create table person (id int, name text, age int)")
+        .unwrap();
+    let resolve = sim
+        .execute("update person set name = ? returning person.id, person.name")
+        .unwrap();
+
+    assert_eq!(resolve.inputs.len(), 1);
+    assert_eq!(resolve.outputs.len(), 2);
+    assert_eq!(
+        resolve.get_output_with_name("id").unwrap().ty,
+        SqlType::Integer
+    );
+    assert_eq!(
+        resolve.get_output_with_name("name").unwrap().ty,
+        SqlType::Text
+    );
+}
+
+#[test]
+fn update_with_returning_alias() {
+    let mut sim = Simulator::default();
+    sim.execute("create table person (id int, name text, age int)")
+        .unwrap();
+    let resolve = sim
+        .execute("update person set name = ? returning id, name as full_name, age as years_old")
+        .unwrap();
+
+    assert_eq!(resolve.inputs.len(), 1);
+    assert_eq!(resolve.outputs.len(), 3);
+    assert_eq!(
+        resolve.get_output_with_name("id").unwrap().ty,
+        SqlType::Integer
+    );
+    assert_eq!(
+        resolve.get_output_with_name("full_name").unwrap().ty,
+        SqlType::Text
+    );
+    assert_eq!(
+        resolve.get_output_with_name("years_old").unwrap().ty,
+        SqlType::Integer
+    );
+}
+
+#[test]
+fn update_with_returning_table_alias() {
+    let mut sim = Simulator::default();
+    sim.execute("create table person (id int, name text, age int)")
+        .unwrap();
+    let resolve = sim
+        .execute("update person as p set name = ? returning p.id, p.name")
+        .unwrap();
+
+    assert_eq!(resolve.inputs.len(), 1);
+    assert_eq!(resolve.outputs.len(), 2);
+    assert_eq!(
+        resolve.get_output_with_name("id").unwrap().ty,
+        SqlType::Integer
+    );
+    assert_eq!(
+        resolve.get_output_with_name("name").unwrap().ty,
+        SqlType::Text
+    );
+}
+
+#[test]
+fn update_with_returning_table_alias_wildcard() {
+    let mut sim = Simulator::default();
+    sim.execute("create table person (id int, name text, age int)")
+        .unwrap();
+    let resolve = sim
+        .execute("update person as p set name = ? returning p.*")
+        .unwrap();
+
+    assert_eq!(resolve.inputs.len(), 1);
+    assert_eq!(resolve.outputs.len(), 3);
+    assert_eq!(
+        resolve.get_output_with_name("id").unwrap().ty,
+        SqlType::Integer
+    );
+    assert_eq!(
+        resolve.get_output_with_name("name").unwrap().ty,
+        SqlType::Text
+    );
+    assert_eq!(
+        resolve.get_output_with_name("age").unwrap().ty,
+        SqlType::Integer
+    );
+}
+
+#[test]
+fn update_with_returning_expression() {
+    let mut sim = Simulator::default();
+    sim.execute("create table person (id int, name text, age int)")
+        .unwrap();
+    let resolve = sim
+        .execute("update person set age = age + ? returning id, age + 1 as next_age")
+        .unwrap();
+
+    assert_eq!(resolve.inputs.len(), 1);
+    assert_eq!(resolve.outputs.len(), 2);
+    assert_eq!(
+        resolve.get_output_with_name("id").unwrap().ty,
+        SqlType::Integer
+    );
+    assert_eq!(
+        resolve.get_output_with_name("next_age").unwrap().ty,
+        SqlType::Integer
+    );
+}
+
+#[test]
+fn update_with_returning_nonexistent_column() {
+    let mut sim = Simulator::default();
+    sim.execute("create table person (id int, name text)")
+        .unwrap();
+    assert_eq!(
+        sim.execute("update person set name = ? returning nonexistent"),
+        Err(Error::ColumnDoesntExist("nonexistent".to_string()))
+    );
+}
+
+#[test]
+fn update_with_returning_invalid_qualifier() {
+    let mut sim = Simulator::default();
+    sim.execute("create table person (id int, name text)")
+        .unwrap();
+    assert_eq!(
+        sim.execute("update person set name = ? returning other_table.id"),
+        Err(Error::QualifiedColumnDoesntExist {
+            qualifier: "other_table".to_string(),
+            column: "id".to_string()
+        })
+    );
+}
+
+#[test]
+fn update_with_join_and_returning() {
+    let mut sim = Simulator::default();
+    sim.execute("create table person (id int, name text, department_id int)")
+        .unwrap();
+    sim.execute("create table department (id int, budget int)")
+        .unwrap();
+    let resolve = sim
+        .execute("update person set name = ? from department where person.department_id = department.id returning person.id, person.name")
+        .unwrap();
+
+    assert_eq!(resolve.inputs.len(), 1);
+    assert_eq!(resolve.outputs.len(), 2);
+    assert_eq!(
+        resolve.get_output_with_name("id").unwrap().ty,
+        SqlType::Integer
+    );
+    assert_eq!(
+        resolve.get_output_with_name("name").unwrap().ty,
+        SqlType::Text
+    );
+}

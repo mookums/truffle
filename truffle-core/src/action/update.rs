@@ -19,7 +19,7 @@ impl Simulator {
         assignments: Vec<Assignment>,
         from: Option<UpdateTableFromKind>,
         selection: Option<Expr>,
-        _: Option<Vec<SelectItem>>,
+        returning: Option<Vec<SelectItem>>,
         _: Option<SqliteOnConflict>,
     ) -> Result<ResolvedQuery, Error> {
         let mut resolved = ResolvedQuery::default();
@@ -135,8 +135,16 @@ impl Simulator {
             }
         }
 
-        // TODO: Support Returning
-        // Specficially for Postgres, MySQL and SQL Server
+        if let Some(returning) = returning {
+            self.process_returning(
+                returning,
+                &inferrer,
+                table_name,
+                table_alias.map(|x| x.as_str()),
+                update_table,
+                &mut resolved,
+            )?;
+        }
 
         if let Some(selection) = selection {
             self.infer_expr_column(
