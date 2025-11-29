@@ -15,19 +15,22 @@ use truffle_loader::{
     migrations::{apply_migrations, load_migrations},
 };
 
-static SIMULATOR: LazyLock<Result<Simulator, Error>> = LazyLock::new(|| {
-    let config = load_config().map_err(|e| Error::new(Span::call_site(), e.to_string()))?;
-
+static SIMULATOR: LazyLock<Result<Simulator, String>> = LazyLock::new(|| {
+    let config = load_config().map_err(|e| e.to_string())?;
     let mut sim = Simulator::with_dialect(config.dialect);
-
-    let migrations =
-        load_migrations(&config).map_err(|e| Error::new(Span::call_site(), e.to_string()))?;
-
-    apply_migrations(&mut sim, &migrations)
-        .map_err(|e| Error::new(Span::call_site(), e.to_string()))?;
+    let migrations = load_migrations(&config).map_err(|e| e.to_string())?;
+    apply_migrations(&mut sim, &migrations).map_err(|e| e.to_string())?;
 
     Ok(sim)
 });
+
+fn get_simulator() -> Result<Simulator, proc_macro::TokenStream> {
+    SIMULATOR.as_ref().map(|sim| sim.clone()).map_err(|e| {
+        Error::new(Span::call_site(), e.as_str())
+            .to_compile_error()
+            .into()
+    })
+}
 
 struct QueryInput {
     sql_lit: syn::LitStr,
@@ -36,7 +39,7 @@ struct QueryInput {
 
 impl Parse for QueryInput {
     fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
-        let sql_lit = input.parse().unwrap();
+        let sql_lit = input.parse()?;
 
         let placeholders: Vec<_> = if input.is_empty() {
             Vec::new()
@@ -67,19 +70,20 @@ impl Parse for QueryAsInput {
     fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
         let fork = input.fork();
 
-        let (ty, sql_lit) = fork
-            .parse::<syn::Type>()
-            .ok()
-            .and_then(|ty| {
-                fork.parse::<Token![,]>().ok().and_then(|_| {
-                    fork.parse::<syn::LitStr>().ok().map(|sql_lit| {
-                        input.advance_to(&fork);
-
-                        (Some(ty), sql_lit)
-                    })
-                })
-            })
-            .unwrap_or_else(|| (None, input.parse().unwrap()));
+        let (ty, sql_lit) = if let Ok(ty) = fork.parse::<syn::Type>() {
+            if fork.parse::<Token![,]>().is_ok() {
+                if let Ok(sql_lit) = fork.parse::<syn::LitStr>() {
+                    input.advance_to(&fork);
+                    (Some(ty), sql_lit)
+                } else {
+                    (None, input.parse()?)
+                }
+            } else {
+                (None, input.parse()?)
+            }
+        } else {
+            (None, input.parse()?)
+        };
 
         let placeholders: Vec<_> = if input.is_empty() {
             Vec::new()
@@ -188,9 +192,9 @@ pub fn query(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let parsed = syn::parse_macro_input!(input as QueryInput);
     let sql = parsed.sql_lit.value();
 
-    let mut sim = match SIMULATOR.as_ref() {
-        Ok(simulator) => simulator.clone(),
-        Err(e) => return e.to_compile_error().into(),
+    let mut sim = match get_simulator() {
+        Ok(sim) => sim,
+        Err(tokens) => return tokens,
     };
 
     let resolve = match sim.execute(&sql) {
@@ -253,9 +257,9 @@ pub fn query_as(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let parsed = syn::parse_macro_input!(input as QueryAsInput);
     let sql = parsed.sql_lit.value();
 
-    let mut sim = match SIMULATOR.as_ref() {
-        Ok(simulator) => simulator.clone(),
-        Err(e) => return e.to_compile_error().into(),
+    let mut sim = match get_simulator() {
+        Ok(sim) => sim,
+        Err(tokens) => return tokens,
     };
 
     let resolve = match sim.execute(&sql) {
