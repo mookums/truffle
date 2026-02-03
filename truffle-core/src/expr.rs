@@ -293,7 +293,7 @@ impl Simulator {
                 }
 
                 InferredColumn {
-                    column: Column::new(infer.column.ty, nullable, false),
+                    column: Column::new(SqlType::Boolean, nullable, false),
                     scope,
                 }
             }
