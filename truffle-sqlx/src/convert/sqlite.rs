@@ -3,7 +3,9 @@ use crate::impl_transparent_compat;
 use truffle::dialect::SqliteDialect;
 
 #[cfg(feature = "time")]
-use time::format_description::well_known::Rfc3339;
+use time::format_description::FormatItem;
+#[cfg(feature = "time")]
+use time::macros::format_description;
 
 use super::{FromSql, IntoSql};
 
@@ -48,16 +50,20 @@ impl FromSql<String, SqliteDialect> for uuid::Uuid {
 }
 
 #[cfg(feature = "time")]
+const PRIMITIVE_DATETIME_FORMAT: &[FormatItem<'static>] =
+    format_description!("[year]-[month]-[day] [hour]:[minute]:[second]");
+
+#[cfg(feature = "time")]
 impl IntoSql<String, SqliteDialect> for time::PrimitiveDateTime {
     fn into_sql_type(self) -> String {
-        self.format(&Rfc3339).unwrap()
+        self.format(&PRIMITIVE_DATETIME_FORMAT).unwrap()
     }
 }
 
 #[cfg(feature = "time")]
 impl FromSql<String, SqliteDialect> for time::PrimitiveDateTime {
     fn from_sql_type(value: String) -> Self {
-        Self::parse(&value, &Rfc3339).unwrap()
+        Self::parse(&value, &PRIMITIVE_DATETIME_FORMAT).unwrap()
     }
 }
 
@@ -77,30 +83,36 @@ impl FromSql<String, SqliteDialect> for time::OffsetDateTime {
 }
 
 #[cfg(feature = "time")]
+const DATE_FORMAT: &[FormatItem<'static>] = format_description!("[year]-[month]-[day]");
+
+#[cfg(feature = "time")]
 impl IntoSql<String, SqliteDialect> for time::Date {
     fn into_sql_type(self) -> String {
-        self.format(&Rfc3339).unwrap()
+        self.format(&DATE_FORMAT).unwrap()
     }
 }
 
 #[cfg(feature = "time")]
 impl FromSql<String, SqliteDialect> for time::Date {
     fn from_sql_type(value: String) -> Self {
-        Self::parse(&value, &Rfc3339).unwrap()
+        Self::parse(&value, &DATE_FORMAT).unwrap()
     }
 }
 
 #[cfg(feature = "time")]
+const TIME_FORMAT: &[FormatItem<'static>] = format_description!("[hour]:[minute]:[second]");
+
+#[cfg(feature = "time")]
 impl IntoSql<String, SqliteDialect> for time::Time {
     fn into_sql_type(self) -> String {
-        self.format(&Rfc3339).unwrap()
+        self.format(&TIME_FORMAT).unwrap()
     }
 }
 
 #[cfg(feature = "time")]
 impl FromSql<String, SqliteDialect> for time::Time {
     fn from_sql_type(value: String) -> Self {
-        Self::parse(&value, &Rfc3339).unwrap()
+        Self::parse(&value, &TIME_FORMAT).unwrap()
     }
 }
 
