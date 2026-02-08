@@ -48,3 +48,21 @@ macro_rules! impl_transparent_compat {
         )*
     };
 }
+
+#[macro_export]
+macro_rules! impl_upcast_compat {
+    ($d:ty, $target:ty, $($source:ty),*) => {
+        $(
+            impl IntoSql<$target, $d> for $source {
+                fn into_sql_type(self) -> $target {
+                    self as $target
+                }
+            }
+            impl FromSql<$target, $d> for $source {
+                fn from_sql_type(value: $target) -> Self {
+                    value as Self
+                }
+            }
+        )*
+    };
+}

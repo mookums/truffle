@@ -1,4 +1,4 @@
-use crate::impl_transparent_compat;
+use crate::{impl_transparent_compat, impl_upcast_compat};
 
 use truffle::dialect::SqliteDialect;
 
@@ -10,6 +10,8 @@ use time::macros::format_description;
 use super::{FromSql, IntoSql};
 
 impl_transparent_compat!(SqliteDialect, i16, i32, i64, f32, f64, String);
+impl_upcast_compat!(SqliteDialect, i32, u8, i8, u16, i16);
+impl_upcast_compat!(SqliteDialect, i64, u8, i8, u16, i16, u32, i32);
 
 impl IntoSql<i32, SqliteDialect> for bool {
     fn into_sql_type(self) -> i32 {

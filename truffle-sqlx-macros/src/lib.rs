@@ -109,7 +109,10 @@ impl Parse for QueryAsInput {
 fn sql_type_to_rust_type(sql_type: &SqlType, dialect: &DialectKind) -> syn::Type {
     match sql_type {
         SqlType::SmallInt => parse_quote!(i16),
-        SqlType::Integer => parse_quote!(i32),
+        SqlType::Integer => match dialect {
+            DialectKind::Sqlite => parse_quote!(i64),
+            _ => parse_quote!(i32),
+        },
         SqlType::BigInt => parse_quote!(i64),
         SqlType::Float => parse_quote!(f32),
         SqlType::Double => parse_quote!(f64),
