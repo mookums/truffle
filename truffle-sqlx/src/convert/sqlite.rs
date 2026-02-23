@@ -25,6 +25,19 @@ impl FromSql<i32, SqliteDialect> for bool {
     }
 }
 
+
+impl IntoSql<i64, SqliteDialect> for bool {
+    fn into_sql_type(self) -> i64 {
+        if self { 1 } else { 0 }
+    }
+}
+
+impl FromSql<i64, SqliteDialect> for bool {
+    fn from_sql_type(value: i64) -> Self {
+        value == 1
+    }
+}
+
 impl IntoSql<String, SqliteDialect> for &str {
     fn into_sql_type(self) -> String {
         self.to_string()
